@@ -31,6 +31,7 @@ renderer.
 | **Long files** | Paged in parts (`p` / `n`); long code blocks are closed and reopened, long tables repeat their header |
 | **Pictures** | A picture on a line of its own is drawn in place (see [Terminals](#terminals)); one inside text becomes a `🖼` link |
 | **HTML and wide tables** | Common HTML (`<details>`, `<br>`, `<img>`, `<a>`, `<b>`, comments) becomes markdown; a table too wide for the pane becomes one record per row |
+| **Editing** | `✎` at the right end of a section opens a bar: type what to change and Enter sends it to Claude as your prompt, naming the file and the section's lines; Claude edits, the pane redraws. In iTerm2 the bar's `vim ↗` (your `$EDITOR`) opens the editor in a split beside the session at that section |
 | **Other files** | Any text file opens as highlighted code with line numbers |
 | **Live** | A file Claude writes or edits redraws at once; one changed elsewhere within 1.5 s |
 | **`/md`** | `/md <path>[#heading\|:line]` opens any file; `/md` alone reopens the last one |

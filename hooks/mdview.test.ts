@@ -22,13 +22,14 @@ type World = {
   files: Record<string, string | { bytes: string }>
   env: Record<string, string>
   runs: string[][]
+  prompts: string[]
   cwd: string
   opened: string[]
   invalidated: number
   closed: number
   doc?: { page: number; target: string | null }
 }
-const world = (files: World['files'], env: Record<string, string> = {}): World => ({ files, env, cwd: '/w', runs: [], opened: [], invalidated: 0, closed: 0 })
+const world = (files: World['files'], env: Record<string, string> = {}): World => ({ files, env, cwd: '/w', runs: [], prompts: [], opened: [], invalidated: 0, closed: 0 })
 
 // The engine beneath a started session: a tiny file system, the working directory, and the pane calls.
 const start = async ($: { session: { start: (e: never) => Promise<unknown> } }, on: On, w: World) => {
@@ -53,6 +54,8 @@ const start = async ($: { session: { start: (e: never) => Promise<unknown> } }, 
     if (f === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: typeof f === 'string' ? f : { base64: f.bytes } } as never
   })
+  on('fs.write', ($, e) => ((w.files[e.path] = e.text), { value: undefined }) as never)
+  on('prompt.submit', ($, e) => (w.prompts.push(e.text), { text: e.text }) as never)
   on('command.register', () => ({ value: { command: 'md' } }) as never)
   on('ui.open', ($, e) => (w.opened.push(e.title ?? e.id), { value: { isPlaced: true } }) as never)
     on('ui.close', () => (w.closed++, { value: undefined }))
@@ -408,6 +411,44 @@ describe('pictures', () => {
       ['sips', '-g', 'pixelWidth'],
       ['sips', '-s', 'format'],
     ])
+    await pane.unmount()
+  })
+})
+
+describe('editing', () => {
+  const field = (pane: unknown) => pane as { input: (t: { key: string; text: string }) => Promise<unknown> }
+
+  test('✎ on a section asks for an instruction and sends it to Claude with the file and the lines', async ($, on) => {
+    const w = world({ '/w/a.md': '# One\n\nalpha\n\n# Two\n\nbeta' }, { TERM_PROGRAM: 'ghostty' })
+    await start($, on, w)
+    await $.command.run({ command: 'md', args: 'a.md' } as never)
+    const pane = await $.ui.mount(PANE)
+    expect(await pane.find({ key: 'edit-0' })).toBeDefined()
+    await pane.press({ key: 'edit-1' })
+    expect(await pane.find({ key: 'edit-1' })).toBeUndefined() // its bar is open instead
+    expect(await pane.find({ key: 'edit-vim' })).toBeUndefined() // not iTerm2
+    await field(pane).input({ key: 'edit-input', text: 'make it a table' })
+    expect(w.prompts).toEqual(['Edit the section "Two" (lines 5-7) of `/w/a.md`: make it a table'])
+    expect(await pane.find({ key: 'edit-input' })).toBeUndefined()
+    await pane.press({ key: 'edit-0' })
+    await pane.press({ key: 'edit-cancel' })
+    expect(await pane.find({ key: 'edit-input' })).toBeUndefined()
+    expect(w.prompts.length).toBe(1)
+    await pane.unmount()
+  })
+
+  test('in iTerm2 the bar can open the editor in a split beside the session, at the section', async ($, on) => {
+    const w = world({ '/w/it\'s.md': '# One\n\nalpha\n\n# Two\n\nbeta' }, { TERM_PROGRAM: 'iTerm.app', TMPDIR: '/t' })
+    await start($, on, w)
+    await $.command.run({ command: 'md', args: '"it\'s.md"' } as never)
+    const pane = await $.ui.mount(PANE)
+    await pane.press({ key: 'edit-1' })
+    await pane.press({ key: 'edit-vim' })
+    expect(w.files['/t/mdview-edit-0.sh']).toBe(`rm -f "$0"\nexec \${EDITOR:-vim} +5 '/w/it'\\''s.md'\n`)
+    const [cmd, flag, apple] = w.runs.at(-1)!
+    expect([cmd, flag]).toEqual(['osascript', '-e'])
+    expect(apple).toBe(`tell application "iTerm2" to tell current session of current window to split vertically with default profile command "/bin/zsh -l '/t/mdview-edit-0.sh'"`)
+    expect(await pane.find({ key: 'edit-input' })).toBeUndefined()
     await pane.unmount()
   })
 })

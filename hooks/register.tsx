@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { MdviewDoc, MdviewFind } from '../types'
+import type { MdviewDoc, MdviewEdit, MdviewFind } from '../types'
 import { bmpPixels, clean, fitCells, halfBlocks, html, paginate, pngSize, sectionAt, sections, split, tables } from './doc'
 import { basename, dirname, FENCE, hrefOf, linkify, MD, refOf, resolveRef } from './links'
 import type { Ref } from './links'
@@ -11,6 +11,7 @@ const doc = atom({ plugin: 'mdview', key: 'doc' } as const, null as MdviewDoc | 
 const rev = atom({ plugin: 'mdview', key: 'rev' } as const, 0)
 const toc = atom({ plugin: 'mdview', key: 'toc' } as const, false)
 const find = atom({ plugin: 'mdview', key: 'find' } as const, null as MdviewFind | null)
+const edit = atom({ plugin: 'mdview', key: 'edit' } as const, null as MdviewEdit | null)
 
 const TEXT_MAX = 9_000 // a Markdown or Code element takes at most 10,000 characters
 const PAGE_MAX = 60_000 // a page of a long file: a whole tree tops out near 100k characters
@@ -27,7 +28,7 @@ type Part =
   | { kind: 'raster'; file: string; cells: string; alt: string; columns: number; rows: number }
   | { kind: 'code'; source: string; path: string; startLine: number }
 // A stretch the pane jumps to: a section of a markdown file, or a run of lines of any other.
-type Unit = { level: number; title: string; slug: string; line: number; plain: string; parts: Part[] }
+type Unit = { level: number; title: string; slug: string; line: number; end: number; plain: string; parts: Part[] }
 type View = { units: Unit[]; pages: number[] } | { note: string }
 
 // Module state: a reload starts these over, which costs only a few stats.
@@ -42,6 +43,8 @@ const views = new Map<string, View>() // lazy: the last 8 files drawn, by path, 
 const sizes = new Map<string, { width: number; height: number } | null>() // lazy: a picture's size, never re-read
 let pictures = false // the terminal draws an Image itself (kitty's graphics protocol); elsewhere pictures are Rasters
 let isWarp = false // Warp has a Markdown viewer of its own, a click away from the pane
+let isITerm = false // iTerm2 splits a session for an editor beside Claude Code when asked through AppleScript
+let editorName = 'vim'
 let tmp = '/tmp'
 let made = 0
 
@@ -194,7 +197,7 @@ async function build($: EngineInterface, path: string): Promise<View> {
   if (IMAGE.test(path)) {
     const img = await imagePart($, path, basename(path), '/')
     return img
-      ? { units: [{ level: 0, title: '', slug: '', line: 1, plain: '', parts: [img] }], pages: [0] }
+      ? { units: [{ level: 0, title: '', slug: '', line: 1, end: 1, plain: '', parts: [img] }], pages: [0] }
       : note(`This picture can't be drawn here. Open ${link} instead.`)
   }
   let raw: string
@@ -210,8 +213,9 @@ async function build($: EngineInterface, path: string): Promise<View> {
     const units: Unit[] = []
     let line = 1
     for (const source of split(src, TEXT_MAX)) {
-      units.push({ level: 0, title: '', slug: '', line, plain: source.toLowerCase(), parts: [{ kind: 'code', source, path, startLine: line }] })
-      line += source.split('\n').length
+      const end = line + source.split('\n').length - 1
+      units.push({ level: 0, title: '', slug: '', line, end, plain: source.toLowerCase(), parts: [{ kind: 'code', source, path, startLine: line }] })
+      line = end + 1
     }
     return { units, pages: paginate(units.map(u => u.plain.length), PAGE_MAX) }
   }
@@ -219,9 +223,11 @@ async function build($: EngineInterface, path: string): Promise<View> {
   const units: Unit[] = []
   for (const s of sections(src)) {
     const parts = await sectionParts($, s.text, path)
-    units.push({ level: s.level, title: plainTitle(s.title), slug: s.slug, line: s.line, plain: s.text.toLowerCase(), parts })
+    units.push({ level: s.level, title: plainTitle(s.title), slug: s.slug, line: s.line, end: 0, plain: s.text.toLowerCase(), parts })
   }
-  if (!units.length) units.push({ level: 0, title: '', slug: '', line: 1, plain: '', parts: [{ kind: 'md', text: '*(empty file)*', hrefs: [] }] })
+  const lines = src.split('\n').length
+  units.forEach((u, i) => (u.end = (units[i + 1]?.line ?? lines + 1) - 1))
+  if (!units.length) units.push({ level: 0, title: '', slug: '', line: 1, end: 1, plain: '', parts: [{ kind: 'md', text: '*(empty file)*', hrefs: [] }] })
   const size = (u: Unit) =>
     u.parts.reduce((n, p) => n + (p.kind === 'md' ? p.text.length : p.kind === 'code' ? p.source.length : p.kind === 'raster' ? p.cells.length : 100), 0)
   return { units, pages: paginate(units.map(size), PAGE_MAX) }
@@ -287,6 +293,7 @@ async function show($: EngineInterface, ref: Ref | null): Promise<string> {
   if (isNew) {
     await update($, doc, x => ({ path: ref.abs, page: 0, target: null, back: x ? [...x.back, x.path].slice(-30) : [] }))
     await update($, find, () => null)
+    await update($, edit, () => null)
     await update($, toc, () => false)
   }
   const placed = await opening
@@ -324,6 +331,7 @@ async function back($: EngineInterface) {
   if (!d || !prev) return
   await update($, doc, () => ({ path: prev, page: 0, target: null, back: d.back.slice(0, -1) }))
   await update($, find, () => null)
+  await update($, edit, () => null)
   await update($, toc, () => false)
   await openPane($, prev)
   void scrollTo($, null)
@@ -333,6 +341,31 @@ async function back($: EngineInterface) {
 async function openWith($: EngineInterface, args: string[]) {
   const run = await $.process.run(['open', ...args], { timeoutMs: 10_000 }).catch((err: unknown) => ({ exitCode: -1, stderr: String(err) }))
   if (run.exitCode !== 0) $.ui.toast(`mdview: could not open it (${run.stderr.trim().slice(0, 120) || `exit ${run.exitCode}`})`)
+}
+
+// ✎ then Enter: the instruction goes to Claude as your own prompt, naming the file and the lines of the section.
+async function sendEdit($: EngineInterface, path: string, u: Unit, instruction: string) {
+  await update($, edit, () => null)
+  const what = instruction.trim()
+  if (!what) return
+  const part = u.title ? `the section "${u.title}" (lines ${u.line}-${u.end})` : `lines ${u.line}-${u.end}`
+  void $.prompt.submit({ text: `Edit ${part} of \`${tilde(path)}\`: ${what}`, asUser: true }).catch(() => undefined)
+  $.ui.toast('mdview: sent to Claude')
+}
+
+const shellQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
+const appleString = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+
+// iTerm2 only: a split beside this session running your editor ($EDITOR, else vim) at the line; quitting it closes
+// the split, and the pane redraws from the saved file. The script removes itself before the editor takes over.
+async function editInITerm($: EngineInterface, path: string, line: number) {
+  await update($, edit, () => null)
+  const script = `${tmp}/mdview-edit-${made++}.sh`
+  await $.fs.write(script, `rm -f "$0"\nexec \${EDITOR:-vim} +${line} ${shellQuote(path)}\n`)
+  const command = appleString(`/bin/zsh -l ${shellQuote(script)}`)
+  const apple = `tell application "iTerm2" to tell current session of current window to split vertically with default profile command ${command}`
+  const run = await $.process.run(['osascript', '-e', apple], { timeoutMs: 15_000 }).catch((err: unknown) => ({ exitCode: -1, stderr: String(err) }))
+  if (run.exitCode !== 0) $.ui.toast(`mdview: iTerm2 did not open the editor (${run.stderr.trim().slice(0, 120) || `exit ${run.exitCode}`})`)
 }
 
 // Enter in the find bar: the next section holding the text, wrapping around; a new text starts from the first.
@@ -362,6 +395,8 @@ export const register: Register = on => {
       /ghostty/i.test((await $.env.get('TERM_PROGRAM')) ?? '') ||
       !!(await $.env.get('KITTY_WINDOW_ID'))
     isWarp = (await $.env.get('TERM_PROGRAM')) === 'WarpTerminal'
+    isITerm = (await $.env.get('TERM_PROGRAM')) === 'iTerm.app'
+    editorName = basename(((await $.env.get('EDITOR')) ?? '').trim().split(/\s+/)[0] ?? '') || 'vim'
     tmp = ((await $.env.get('TMPDIR')) ?? '/tmp').replace(/\/+$/, '') || '/tmp'
     await $.command.register({ name: 'md', description: 'Show a file rendered in a side pane', argumentHint: '<path>[#heading|:line]' })
     await $.tool.register({
@@ -439,6 +474,7 @@ export const register: Register = on => {
       isOpen = false
       await update($, toc, () => false)
       await update($, find, () => null)
+      await update($, edit, () => null)
     }
     return result
   })
@@ -527,6 +563,7 @@ export const register: Register = on => {
     await read($, rev) // subscribes: a change on disk redraws
     const isTocOpen = await read($, toc)
     const f = await read($, find)
+    const ed = await read($, edit)
     if (!d) return <Text dimColor>{'Click a .md path in the conversation, or run /md <path>.'}</Text>
 
     const v = await load($, d.path)
@@ -536,6 +573,7 @@ export const register: Register = on => {
     const page = Math.min(d.page, pageCount - 1)
     const heads = units.flatMap((u, i) => (u.level > 0 ? [{ u, i }] : []))
     const follow = (link: { href: string }) => press($, link.href)
+    const editing = ed && ed.path === d.path ? ed.unit : -1
 
     const pager = (where: 'top' | 'bottom') =>
       pageCount > 1 ? (
@@ -600,7 +638,36 @@ export const register: Register = on => {
         )}
         {pager('top')}
         {'note' in v && <Markdown key="note" text={v.note} />}
-        {units.flatMap((u, i) => (pages[i] === page ? u.parts.map((p, j) => draw(p, keyOf(i, j))) : []))}
+        {units.flatMap((u, i) =>
+          pages[i] !== page
+            ? []
+            : [
+                <Box key={`sec${i}`} flexDirection="column">
+                  {editing === i && Input && (
+                    <Box flexDirection="row" gap={1}>
+                      <Box flexGrow={1}>
+                        <Input
+                          key="edit-input"
+                          placeholder={`Tell Claude how to change ${u.title ? `"${u.title}"` : 'this part'}; Enter sends`}
+                          submitLabel="send"
+                          autoFocus
+                          onSubmit={text => sendEdit($, d.path, u, text)}
+                        />
+                      </Box>
+                      {isITerm && <Button key="edit-vim" label={`${editorName} ↗`} onPress={() => editInITerm($, d.path, u.line)} />}
+                      <Button key="edit-cancel" label="✕" onPress={() => update($, edit, () => null)} />
+                    </Box>
+                  )}
+                  {u.parts.map((p, j) => draw(p, keyOf(i, j)))}
+                  {Input && editing !== i && (
+                    // over the right end of the section's first row, so it costs no line of its own
+                    <Box position="absolute" top={0} right={0}>
+                      <Button key={`edit-${i}`} plain dimColor label="✎" onPress={() => update($, edit, () => ({ path: d.path, unit: i }))} />
+                    </Box>
+                  )}
+                </Box>,
+              ],
+        )}
         {pager('bottom')}
       </Box>
     )
