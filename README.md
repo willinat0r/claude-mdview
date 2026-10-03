@@ -35,7 +35,7 @@ renderer.
 | **Live** | A file Claude writes or edits redraws at once; one changed elsewhere within 1.5 s |
 | **`/md`** | `/md <path>[#heading\|:line]` opens any file; `/md` alone reopens the last one |
 | **Tool** | `mcp__mdview__show` lets Claude open a file in the pane when you ask it to |
-| **Warp** | `Warp ↗` (`w`) hands the file to Warp's own Markdown viewer, split to the right (Warp's "open file layout" setting), with sharp pictures and mermaid |
+| **Warp** | A click on a path opens Warp's own Markdown viewer split to the right (Warp's "open file layout" setting) instead of the pane: sharp pictures, mermaid, editing. In the pane (`/md`), `Warp ↗` (`w`) does the same |
 
 ## Install
 
@@ -60,7 +60,7 @@ or for one session: `claude --plugin-dir ~/Desktop/claude-mdview`.
 | --- | --- |
 | Ghostty, kitty | The terminal's own picture (kitty graphics protocol) |
 | iTerm2 3.7+ | The same, with `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` set for iTerm2 only, e.g. in `~/.zshrc`: `[[ $TERM_PROGRAM == iTerm.app ]] && export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` |
-| Warp, others | Colored half blocks (`▀`, two pixels a cell): recognizable, not sharp; `↗ original` under one opens the file in its default app. In Warp, `Warp ↗` shows the whole file in Warp's viewer instead |
+| Warp, others | Colored half blocks (`▀`, two pixels a cell): recognizable, not sharp; `↗ original` under one opens the file in its default app. In Warp a click goes to Warp's own viewer instead |
 
 Claude Code draws pictures only in kitty and Ghostty unless forced. iTerm2 3.7 has the kitty graphics protocol and its
 Unicode placeholders, so forcing works there; Warp has no placeholders yet

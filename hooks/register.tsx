@@ -305,6 +305,19 @@ function press($: EngineInterface, href: string): Promise<unknown> {
     .catch((err: unknown) => $.ui.toast(`mdview: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200)))
 }
 
+// Warp's own Markdown viewer, split to the right as its "open file layout" setting says (a file:// URL would open a tab).
+const warpUrl = (ref: Ref): string => {
+  const line = /^L(\d+)$/i.exec(ref.frag)?.[1]
+  return `warp://action/open_file_editor?path=${encodeURIComponent(ref.abs)}${line ? `&line=${line}` : ''}`
+}
+
+// A click on a path in the conversation: in Warp, Warp's own viewer beside it; elsewhere the pane.
+function pressFromTranscript($: EngineInterface, href: string): Promise<unknown> {
+  if (!isWarp) return press($, href)
+  const ref = refOf(href)
+  return ref ? openWith($, [warpUrl(ref)]) : Promise.resolve()
+}
+
 async function back($: EngineInterface) {
   const d = await read($, doc)
   const prev = d?.back.at(-1)
@@ -394,6 +407,10 @@ export const register: Register = on => {
     const ref = resolveRef(arg, await $.session.cwd(), await homeDir($), { anyExt: true })
     const st = ref ? await $.fs.stat(ref.abs).catch(() => null) : null
     if (!ref || st?.kind !== 'file') return { result: `No such file: ${arg}` }
+    if (isWarp) {
+      await openWith($, [warpUrl(ref)])
+      return { result: `${tilde(ref.abs)}: opened in Warp's viewer, split to the right` }
+    }
     try {
       return { result: `${tilde(ref.abs)}: pane ${await show($, ref)}` }
     } catch (err) {
@@ -437,7 +454,7 @@ export const register: Register = on => {
     const linked = await linkFiles($, e.props.text, [...new Set([cwdOf.get(e.requestId)!, ...cwds])])
     if (!linked) return next(e)
     const { Box, Markdown, Text } = $.ui.resolve(e)
-    const follow = (link: { href: string }) => press($, link.href)
+    const follow = (link: { href: string }) => pressFromTranscript($, link.href)
     return (
       <Box flexDirection="row" marginTop={1}>
         <Box minWidth={2}>
@@ -470,7 +487,7 @@ export const register: Register = on => {
       <Box flexDirection="column">
         {await next(e)}
         <Box paddingLeft={2}>
-          <Markdown key="open" dimColor text={`⎿  [${tilde(file)}${MARK}](${href})`} pressableLinks={[href]} onLinkPress={link => press($, link.href)} />
+          <Markdown key="open" dimColor text={`⎿  [${tilde(file)}${MARK}](${href})`} pressableLinks={[href]} onLinkPress={link => pressFromTranscript($, link.href)} />
         </Box>
       </Box>
     )
@@ -492,7 +509,7 @@ export const register: Register = on => {
             dimColor
             text={`⎿  ${hrefs.map(h => `[${tilde(refOf(h)?.abs ?? h)}${MARK}](${h})`).join(' · ')}`}
             pressableLinks={hrefs}
-            onLinkPress={link => press($, link.href)}
+            onLinkPress={link => pressFromTranscript($, link.href)}
           />
         </Box>
       </Box>
@@ -560,8 +577,7 @@ export const register: Register = on => {
           <Button key="close" label="✕" role="dismiss" hotkey="q" onPress={() => $.ui.close({ id: PANE })} />
           {d.back.length > 0 && <Button key="back" label="← Back" hotkey="b" onPress={() => back($)} />}
           {heads.length > 1 && <Button key="toc" label={isTocOpen ? 'Contents ▾' : 'Contents'} hotkey="t" onPress={() => update($, toc, x => !x)} />}
-          {/* Warp's own Markdown viewer, split to the right as its "open file layout" setting says (a file:// URL would open a tab) */}
-          {isWarp && <Button key="warp" label="Warp ↗" hotkey="w" onPress={() => openWith($, [`warp://action/open_file_editor?path=${encodeURIComponent(d.path)}`])} />}
+          {isWarp && <Button key="warp" label="Warp ↗" hotkey="w" onPress={() => openWith($, [warpUrl({ abs: d.path, frag: '' })])} />}
           {Input && units.length > 0 && (
             <Button key="find-toggle" label="Find" hotkey="f" onPress={() => update($, find, x => (x ? null : { query: '', at: 0, hits: 0 }))} />
           )}

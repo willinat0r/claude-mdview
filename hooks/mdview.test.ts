@@ -356,6 +356,18 @@ describe('pictures', () => {
     await pane.unmount()
   })
 
+  test('in Warp a click on a path in the conversation opens Warp\'s viewer, at the line it names', async ($, on) => {
+    const w = world({ '/w/README.md': '# R' }, { TERM_PROGRAM: 'WarpTerminal' })
+    await start($, on, w)
+    const ui = await $.ui.mount(reply('See `README.md:3`.'))
+    await ui.press({ key: 'r0', link: { href: 'file:///w/README.md#L3' } })
+    expect(w.runs.at(-1)).toEqual(['open', 'warp://action/open_file_editor?path=%2Fw%2FREADME.md&line=3'])
+    expect(w.opened).toEqual([]) // no pane
+    await ui.unmount()
+    expect(await $.tool.call({ tool: 'mcp__mdview__show', path: 'README.md' } as never)).toMatchObject({ result: expect.stringContaining('Warp') })
+    expect(w.runs.at(-1)).toEqual(['open', 'warp://action/open_file_editor?path=%2Fw%2FREADME.md'])
+  })
+
   test('outside Warp there is no Warp button', async ($, on) => {
     const w = world({ '/w/a.md': '# A' }, { TERM_PROGRAM: 'iTerm.app' })
     await start($, on, w)
