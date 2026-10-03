@@ -386,3 +386,32 @@ export const fitCells = (width: number, height: number, maxColumns: number, maxR
   }
   return { columns, rows }
 }
+
+export type SourceBlock = { text: string; line: number; end: number }
+
+// The blank-line separated blocks of a section's text, a fenced code block whole with its blank lines, each with
+// the file lines it spans (`firstLine` is the section's first).
+export const blocksOf = (text: string, firstLine: number): SourceBlock[] => {
+  const lines = text.split('\n')
+  const out: SourceBlock[] = []
+  let cur: string[] = []
+  let start = 0
+  let fence: string | null = null
+  const push = (last: number) => {
+    if (cur.length) out.push({ text: cur.join('\n'), line: firstLine + start, end: firstLine + last })
+    cur = []
+  }
+  lines.forEach((line, idx) => {
+    if (fence) {
+      cur.push(line)
+      if (closes(line, fence)) fence = null
+      return
+    }
+    if (line.trim() === '') return push(idx - 1)
+    if (!cur.length) start = idx
+    fence = FENCE.exec(line)?.[1] ?? null
+    cur.push(line)
+  })
+  push(lines.length - 1)
+  return out
+}

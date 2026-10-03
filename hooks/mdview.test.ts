@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { bmpPixels, fitCells, halfBlocks, html, paginate, pngSize, sectionAt, sections, split, tables } from './doc'
+import { blocksOf, bmpPixels, fitCells, halfBlocks, html, paginate, pngSize, sectionAt, sections, split, tables } from './doc'
 import { hrefOf, linkify, refOf, resolveRef } from './links'
 
 const PNG_640x480 = 'iVBORw0KGgoAAAANSUhEUgAAAoAAAAHgCAIAAAA='
@@ -164,6 +164,15 @@ describe('doc', () => {
     expect(paginate([50, 50, 50, 10], 100)).toEqual([0, 0, 1, 1])
   })
 
+  test('blocks keep the file lines they span; a fence stays whole across its blank lines', () => {
+    expect(blocksOf('# T\n\npara one\nstill one\n\n```\na\n\nb\n```\n\n- x', 10)).toEqual([
+      { text: '# T', line: 10, end: 10 },
+      { text: 'para one\nstill one', line: 12, end: 13 },
+      { text: '```\na\n\nb\n```', line: 15, end: 19 },
+      { text: '- x', line: 21, end: 21 },
+    ])
+  })
+
   test('a PNG size comes from its header', () => {
     expect(pngSize(PNG_640x480)).toEqual({ width: 640, height: 480 })
     expect(pngSize('aGVsbG8gd29ybGQgaGVsbG8gd29ybGQ=')).toBeNull()
@@ -188,14 +197,16 @@ test('a reply links existing .md files; a click opens the pane; links inside jum
 
   const pane = await $.ui.mount(PANE)
   expect((await pane.find({ type: 'Markdown', key: 'u0' }))?.props.text).toBe('```yaml\nname: r\n```')
-  expect((await pane.find({ type: 'Markdown', key: 'u1' }))?.props.text).toBe(
-    '# Read me\n\nNext: [guide↗](file:///w/docs/guide.md#usage) and [top↗](file:///w/README.md#read-me)',
+  expect((await pane.find({ type: 'Markdown', key: 'u1' }))?.props.text).toBe('# Read me') // a block each
+  expect((await pane.find({ type: 'Markdown', key: 'u1-1' }))?.props.text).toBe(
+    'Next: [guide↗](file:///w/docs/guide.md#usage) and [top↗](file:///w/README.md#read-me)',
   )
   expect(await pane.find({ key: 'back' })).toBeUndefined()
 
-  await pane.press({ key: 'u1', link: { href: 'file:///w/docs/guide.md#usage' } })
+  await pane.press({ key: 'u1-1', link: { href: 'file:///w/docs/guide.md#usage' } })
   expect(w.opened.at(-1)).toBe('guide.md')
-  expect((await pane.find({ type: 'Markdown', key: 'u1' }))?.props.text).toBe('## Usage\n\nrun it')
+  expect((await pane.find({ type: 'Markdown', key: 'u1' }))?.props.text).toBe('## Usage')
+  expect((await pane.find({ type: 'Markdown', key: 'u1-1' }))?.props.text).toBe('run it')
   expect(w.doc?.target).toBe('u1')
 
   await pane.press({ key: 'back' })
@@ -417,18 +428,17 @@ describe('pictures', () => {
 describe('editing', () => {
   const field = (pane: unknown) => pane as { input: (t: { key: string; text: string }) => Promise<unknown> }
 
-  test('✎ on a section asks for an instruction and sends it to Claude with the file and the lines', async ($, on) => {
-    const w = world({ '/w/a.md': '# One\n\nalpha\n\n# Two\n\nbeta' }, {})
+  test('each block has a ✎ that shows on hover; it sends the instruction to Claude with the lines and how they begin', async ($, on) => {
+    const w = world({ '/w/a.md': '# One\n\nalpha\n\n# Two\n\nbeta  gamma\ndelta' }, {})
     await start($, on, w)
     await $.command.run({ command: 'md', args: 'a.md' } as never)
     const pane = await $.ui.mount(PANE)
-    expect(await pane.find({ key: 'edit-0' })).toBeDefined()
-    await pane.press({ key: 'edit-1' })
-    expect(await pane.find({ key: 'edit-1' })).toBeUndefined() // its bar is open instead
+    for (const key of ['edit-0-0', 'edit-0-1', 'edit-1-0', 'edit-1-1']) expect(await pane.find({ key })).toBeDefined()
+    await pane.press({ key: 'edit-1-1' })
     await field(pane).input({ key: 'edit-input', text: 'make it a table' })
-    expect(w.prompts).toEqual(['Edit the section "Two" (lines 5-7) of `/w/a.md`: make it a table'])
+    expect(w.prompts).toEqual(['Edit lines 7-8 of `/w/a.md` in the section "Two", which begin "beta gamma": make it a table'])
     expect(await pane.find({ key: 'edit-input' })).toBeUndefined()
-    await pane.press({ key: 'edit-0' })
+    await pane.press({ key: 'edit-0-0' })
     await pane.press({ key: 'edit-cancel' })
     expect(await pane.find({ key: 'edit-input' })).toBeUndefined()
     expect(w.prompts.length).toBe(1)

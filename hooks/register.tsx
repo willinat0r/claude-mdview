@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { MdviewDoc, MdviewEdit, MdviewFind } from '../types'
-import { bmpPixels, clean, fitCells, halfBlocks, html, paginate, pngSize, sectionAt, sections, split, tables } from './doc'
+import { blocksOf, bmpPixels, clean, fitCells, halfBlocks, html, paginate, pngSize, sectionAt, sections, split, tables } from './doc'
 import { basename, dirname, FENCE, hrefOf, linkify, MD, refOf, resolveRef } from './links'
 import type { Ref } from './links'
 
@@ -28,7 +28,10 @@ type Part =
   | { kind: 'raster'; file: string; cells: string; alt: string; columns: number; rows: number }
   | { kind: 'code'; source: string; path: string; startLine: number }
 // A stretch the pane jumps to: a section of a markdown file, or a run of lines of any other.
-type Unit = { level: number; title: string; slug: string; line: number; end: number; plain: string; parts: Part[] }
+// A blank-line separated block of the file (a paragraph, list, table, fence, heading): the lines it spans, how it
+// begins, and what draws it.
+type Block = { line: number; end: number; first: string; parts: Part[] }
+type Unit = { level: number; title: string; slug: string; line: number; end: number; plain: string; blocks: Block[] }
 type View = { units: Unit[]; pages: number[] } | { note: string }
 
 // Module state: a reload starts these over, which costs only a few stats.
@@ -195,7 +198,7 @@ async function build($: EngineInterface, path: string): Promise<View> {
   if (IMAGE.test(path)) {
     const img = await imagePart($, path, basename(path), '/')
     return img
-      ? { units: [{ level: 0, title: '', slug: '', line: 1, end: 1, plain: '', parts: [img] }], pages: [0] }
+      ? { units: [{ level: 0, title: '', slug: '', line: 1, end: 1, plain: '', blocks: [{ line: 1, end: 1, first: '', parts: [img] }] }], pages: [0] }
       : note(`This picture can't be drawn here. Open ${link} instead.`)
   }
   let raw: string
@@ -212,7 +215,8 @@ async function build($: EngineInterface, path: string): Promise<View> {
     let line = 1
     for (const source of split(src, TEXT_MAX)) {
       const end = line + source.split('\n').length - 1
-      units.push({ level: 0, title: '', slug: '', line, end, plain: source.toLowerCase(), parts: [{ kind: 'code', source, path, startLine: line }] })
+      const parts: Part[] = [{ kind: 'code', source, path, startLine: line }]
+      units.push({ level: 0, title: '', slug: '', line, end, plain: source.toLowerCase(), blocks: [{ line, end, first: '', parts }] })
       line = end + 1
     }
     return { units, pages: paginate(units.map(u => u.plain.length), PAGE_MAX) }
@@ -220,14 +224,19 @@ async function build($: EngineInterface, path: string): Promise<View> {
 
   const units: Unit[] = []
   for (const s of sections(src)) {
-    const parts = await sectionParts($, s.text, path)
-    units.push({ level: s.level, title: plainTitle(s.title), slug: s.slug, line: s.line, end: 0, plain: s.text.toLowerCase(), parts })
+    const blocks: Block[] = []
+    for (const b of blocksOf(s.text, s.line)) {
+      const parts = await sectionParts($, b.text, path)
+      const first = b.text.split('\n').find(l => l.trim())?.trim().replace(/\s+/g, ' ') ?? ''
+      if (parts.length) blocks.push({ line: b.line, end: b.end, first: first.length > 40 ? `${first.slice(0, 40)}…` : first, parts })
+    }
+    units.push({ level: s.level, title: plainTitle(s.title), slug: s.slug, line: s.line, end: 0, plain: s.text.toLowerCase(), blocks })
   }
   const lines = src.split('\n').length
   units.forEach((u, i) => (u.end = (units[i + 1]?.line ?? lines + 1) - 1))
-  if (!units.length) units.push({ level: 0, title: '', slug: '', line: 1, end: 1, plain: '', parts: [{ kind: 'md', text: '*(empty file)*', hrefs: [] }] })
+  if (!units.length) units.push({ level: 0, title: '', slug: '', line: 1, end: 1, plain: '', blocks: [{ line: 1, end: 1, first: '', parts: [{ kind: 'md', text: '*(empty file)*', hrefs: [] }] }] })
   const size = (u: Unit) =>
-    u.parts.reduce((n, p) => n + (p.kind === 'md' ? p.text.length : p.kind === 'code' ? p.source.length : p.kind === 'raster' ? p.cells.length : 100), 0)
+    u.blocks.flatMap(b => b.parts).reduce((n, p) => n + (p.kind === 'md' ? p.text.length : p.kind === 'code' ? p.source.length : p.kind === 'raster' ? p.cells.length : 100), 0)
   return { units, pages: paginate(units.map(size), PAGE_MAX) }
 }
 
@@ -341,13 +350,14 @@ async function openWith($: EngineInterface, args: string[]) {
   if (run.exitCode !== 0) $.ui.toast(`mdview: could not open it (${run.stderr.trim().slice(0, 120) || `exit ${run.exitCode}`})`)
 }
 
-// ✎ then Enter: the instruction goes to Claude as your own prompt, naming the file and the lines of the section.
-async function sendEdit($: EngineInterface, path: string, u: Unit, instruction: string) {
+// ✎ then Enter: the instruction goes to Claude as your own prompt, naming the file, the block's lines and how it begins.
+async function sendEdit($: EngineInterface, path: string, u: Unit, b: Block, instruction: string) {
   await update($, edit, () => null)
   const what = instruction.trim()
   if (!what) return
-  const part = u.title ? `the section "${u.title}" (lines ${u.line}-${u.end})` : `lines ${u.line}-${u.end}`
-  void $.prompt.submit({ text: `Edit ${part} of \`${tilde(path)}\`: ${what}`, asUser: true }).catch(() => undefined)
+  const where = u.title ? ` in the section "${u.title}"` : ''
+  const begins = b.first ? `, which begin "${b.first}"` : ''
+  void $.prompt.submit({ text: `Edit lines ${b.line}-${b.end} of \`${tilde(path)}\`${where}${begins}: ${what}`, asUser: true }).catch(() => undefined)
   $.ui.toast('mdview: sent to Claude')
 }
 
@@ -554,7 +564,6 @@ export const register: Register = on => {
     const page = Math.min(d.page, pageCount - 1)
     const heads = units.flatMap((u, i) => (u.level > 0 ? [{ u, i }] : []))
     const follow = (link: { href: string }) => press($, link.href)
-    const editing = ed && ed.path === d.path ? ed.unit : -1
 
     const pager = (where: 'top' | 'bottom') =>
       pageCount > 1 ? (
@@ -619,36 +628,40 @@ export const register: Register = on => {
         )}
         {pager('top')}
         {'note' in v && <Markdown key="note" text={v.note} />}
-        {units.flatMap((u, i) =>
-          pages[i] !== page
-            ? []
-            : [
-                // a blank line between sections, as the file itself reads, so each ✎ sits clear of the section above
-                <Box key={`sec${i}`} flexDirection="column" marginTop={pages.indexOf(page) === i ? 0 : 1}>
-                  {editing === i && Input && (
+        {units.flatMap((u, i) => {
+          if (pages[i] !== page) return []
+          const firstPart = u.blocks.map((_, k) => u.blocks.slice(0, k).reduce((n, b) => n + b.parts.length, 0))
+          return [
+            // a blank line between sections and between blocks, as the file itself reads
+            <Box key={`sec${i}`} flexDirection="column" marginTop={pages.indexOf(page) === i ? 0 : 1}>
+              {u.blocks.map((b, k) => (
+                // each block a hover scope: its ✎ shows while the pointer is over it
+                <Box key={`blk${i}-${k}`} flexDirection="column" marginTop={k ? 1 : 0}>
+                  {ed?.path === d.path && ed.unit === i && ed.block === k && Input && (
                     <Box flexDirection="row" gap={1}>
                       <Box flexGrow={1}>
                         <Input
                           key="edit-input"
-                          placeholder={`Tell Claude how to change ${u.title ? `"${u.title}"` : 'this part'}; Enter sends`}
+                          placeholder={`Tell Claude how to change lines ${b.line}-${b.end}; Enter sends`}
                           submitLabel="send"
                           autoFocus
-                          onSubmit={text => sendEdit($, d.path, u, text)}
+                          onSubmit={text => sendEdit($, d.path, u, b, text)}
                         />
                       </Box>
                       <Button key="edit-cancel" label="✕" onPress={() => update($, edit, () => null)} />
                     </Box>
                   )}
-                  {u.parts.map((p, j) => draw(p, keyOf(i, j)))}
-                  {Input && editing !== i && (
-                    // over the right end of the section's first row, so it costs no line of its own
-                    <Box position="absolute" top={0} right={0}>
-                      <Button key={`edit-${i}`} plain dimColor label="✎" onPress={() => update($, edit, () => ({ path: d.path, unit: i }))} />
+                  {b.parts.map((p, m) => draw(p, keyOf(i, firstPart[k]! + m)))}
+                  {Input && (
+                    <Box position="absolute" top={0} right={0} display="none" hover={{ display: 'flex' }}>
+                      <Button key={`edit-${i}-${k}`} plain dimColor label="✎" onPress={() => update($, edit, () => ({ path: d.path, unit: i, block: k }))} />
                     </Box>
                   )}
-                </Box>,
-              ],
-        )}
+                </Box>
+              ))}
+            </Box>,
+          ]
+        })}
         {pager('bottom')}
       </Box>
     )
