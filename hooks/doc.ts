@@ -415,3 +415,10 @@ export const blocksOf = (text: string, firstLine: number): SourceBlock[] => {
   push(lines.length - 1)
   return out
 }
+
+// A short fingerprint of a block's text (FNV-1a, 32 bits): how an open edit bar knows its block again.
+export const hashOf = (s: string): string => {
+  let h = 0x811c9dc5
+  for (const ch of s) h = Math.imul(h ^ ch.codePointAt(0)!, 0x01000193) >>> 0
+  return h.toString(36)
+}

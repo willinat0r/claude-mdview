@@ -35,7 +35,7 @@ renderer.
 | **Other files** | Any text file opens as highlighted code with line numbers |
 | **Live** | A file Claude writes or edits redraws at once; one changed elsewhere within 1.5 s |
 | **`/md`** | `/md <path>[#heading\|:line]` opens any file; `/md` alone reopens the last one; `/md mode` switches what a click opens |
-| **Tool** | `mcp__mdview__show` lets Claude open a file in the pane when you ask it to |
+| **Tool** | `mcp__mdview__show` lets Claude open a file in the pane (in Warp, Warp's viewer) when you ask it to; it never hands a file to an app |
 | **Warp** | By default a click on a path opens Warp's own Markdown viewer split to the right (Warp's "open file layout" setting): sharp pictures, mermaid, editing; see [Configure](#configure) for the pane or the app. In the pane, `Warp ↗` (`w`) does the same |
 
 ## Install

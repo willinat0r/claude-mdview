@@ -400,6 +400,27 @@ describe('pictures', () => {
 describe('editing', () => {
   const field = (pane: unknown) => pane as { input: (t: { key: string; text: string }) => Promise<unknown> }
 
+  test('blocks that begin alike are told apart by their whole text', async ($, on) => {
+    const w = world({ '/w/a.md': '# T\n\n```bash\necho a\n```\n\n```bash\necho b\n```' }, {})
+    await start($, on, w)
+    await $.command.run({ command: 'md', args: 'a.md' } as never)
+    let pane = await $.ui.mount(PANE)
+    await pane.press({ key: 'edit-0-2' }) // the "echo b" fence, lines 7-9
+    await pane.unmount()
+    w.files['/w/a.md'] = '# T\n\nx\n\ny\n\n```bash\necho a\n```\n\n```bash\necho b\n```' // "echo a" now nearer line 7
+    w.mtimes['/w/a.md'] = 2
+    pane = await $.ui.mount(PANE)
+    await field(pane).input({ key: 'edit-input', text: 'use printf' })
+    expect(w.prompts).toEqual(['Edit lines 11-13 of `/w/a.md` in the section "T", which begin "```bash": use printf'])
+    await pane.press({ key: 'edit-0-4' })
+    await pane.unmount()
+    w.files['/w/a.md'] = '# T\n\nx\n\ny\n\n```bash\necho a\n```' // the block is gone; its look-alike stays
+    w.mtimes['/w/a.md'] = 3
+    pane = await $.ui.mount(PANE)
+    expect(await pane.find({ key: 'edit-input' })).toBeUndefined()
+    await pane.unmount()
+  })
+
   test('the edit bar stays on its block when the file changes above it, and closes when the block is gone', async ($, on) => {
     const w = world({ '/w/a.md': '# One\n\nalpha\n\nbeta' }, {})
     await start($, on, w)
@@ -535,6 +556,29 @@ describe('click modes', () => {
     expect(await $.command.run({ command: 'md', args: 'mode app' } as never)).toMatchObject({ text: 'Could not switch: locked by policy' })
     w.configAnswer = { value: 'pane' }
     expect(await $.command.run({ command: 'md', args: 'mode app' } as never)).toMatchObject({ text: expect.stringContaining('clickOpens: pane') })
+  })
+
+  test('the model\'s show tool opens the pane even when clicks go to the app', { options: { clickOpens: 'app' } }, async ($, on) => {
+    const w = world({ '/w/README.md': '# R', '/w/run.command': 'echo hi' }, {})
+    await start($, on, w)
+    expect(await $.tool.call({ tool: 'mcp__mdview__show', path: 'run.command' } as never)).toMatchObject({ result: expect.stringContaining("mdview's pane") })
+    expect(w.runs).toEqual([]) // nothing handed to `open`
+    expect(w.opened).toEqual(['run.command'])
+  })
+
+  test('a reply keeps resolving its relative paths where it was first drawn, after a cd', async ($, on) => {
+    const w = world({ '/w/README.md': '# here', '/x/README.md': '# there' }, {})
+    await start($, on, w)
+    let ui = await $.ui.mount(reply('See `README.md`.', FULL, 'old'))
+    expect((await ui.find({ type: 'Markdown', key: 'r0' }))?.props.pressableLinks).toEqual(['file:///w/README.md'])
+    await ui.unmount()
+    w.cwd = '/x'
+    ui = await $.ui.mount(reply('See `README.md`.', FULL, 'old'))
+    expect((await ui.find({ type: 'Markdown', key: 'r0' }))?.props.pressableLinks).toEqual(['file:///w/README.md'])
+    await ui.unmount()
+    ui = await $.ui.mount(reply('See `README.md`.', FULL, 'new'))
+    expect((await ui.find({ type: 'Markdown', key: 'r0' }))?.props.pressableLinks).toEqual(['file:///x/README.md'])
+    await ui.unmount()
   })
 
   test('a file named mode opens instead of switching', async ($, on) => {

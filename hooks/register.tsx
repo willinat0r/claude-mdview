@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { MdviewDoc, MdviewEdit, MdviewFind } from '../types'
-import { blocksOf, bmpPixels, clean, fitCells, halfBlocks, html, paginate, pngSize, sectionAt, sections, split, tables } from './doc'
+import { blocksOf, bmpPixels, clean, fitCells, halfBlocks, hashOf, html, paginate, pngSize, sectionAt, sections, split, tables } from './doc'
 import { basename, dirname, FENCE, hrefOf, linkify, MD, refOf, resolveRef } from './links'
 import type { Ref } from './links'
 
@@ -11,7 +11,7 @@ const doc = atom({ plugin: 'mdview', key: 'doc' } as const, null as MdviewDoc | 
 const rev = atom({ plugin: 'mdview', key: 'rev' } as const, 0)
 const toc = atom({ plugin: 'mdview', key: 'toc' } as const, false)
 const find = atom({ plugin: 'mdview', key: 'find' } as const, null as MdviewFind | null)
-const edit = atom({ plugin: 'mdview', key: 'edit' } as const, null as MdviewEdit | null)
+const edit = atom({ plugin: 'mdview', key: 'edit' } as const, null as MdviewEdit | null, { shape: 'line+hash' })
 const cwdHistory = atom({ plugin: 'mdview', key: 'cwds' } as const, [] as string[])
 
 const TEXT_MAX = 9_000 // a Markdown or Code element takes at most 10,000 characters
@@ -31,7 +31,7 @@ type Part =
 // A stretch the pane jumps to: a section of a markdown file, or a run of lines of any other.
 // A blank-line separated block of the file (a paragraph, list, table, fence, heading): the lines it spans, how it
 // begins, and what draws it.
-type Block = { line: number; end: number; first: string; parts: Part[] }
+type Block = { line: number; end: number; first: string; hash: string; parts: Part[] }
 type Unit = { level: number; title: string; slug: string; line: number; end: number; plain: string; blocks: Block[] }
 type View = { units: Unit[]; pages: number[] } | { note: string }
 
@@ -41,15 +41,22 @@ let columns = 0 // the widest the terminal has been seen
 let paneColumns = 80
 let isOpen = false
 const known = new Set<string>() // files seen to exist
+// A transcript row's working directory when first drawn: its relative paths are resolved there first, so a cd does not
+// move them (lost on a reload, when the session's directory history stands in).
+const cwdOf = new Map<string, string>()
 const views = new Map<string, View>() // lazy: the last 8 files drawn, by path, mtime and width
 const sizes = new Map<string, { width: number; height: number } | null>() // lazy: a picture's size, never re-read
 let pictures = false // the terminal draws an Image itself (kitty's graphics protocol); elsewhere pictures are Rasters
 let isWarp = false // Warp has a Markdown viewer of its own, a click away from the pane
 // What a click on a path in the conversation opens (userConfig): outside Warp `clickOpens`, in Warp `clickOpensInWarp`.
 type Mode = 'pane' | 'warp' | 'app'
-let clickOpens: Mode = 'pane'
-let clickOpensInWarp: Mode = 'warp'
-const modeHere = (): Mode => (isWarp ? clickOpensInWarp : clickOpens)
+const SETTING = {
+  warp: { key: 'clickOpensInWarp', choices: ['warp', 'pane', 'app'] as Mode[] },
+  other: { key: 'clickOpens', choices: ['pane', 'app'] as Mode[] },
+} as const
+const modes: Record<keyof typeof SETTING, Mode> = { warp: 'warp', other: 'pane' }
+const here = (): keyof typeof SETTING => (isWarp ? 'warp' : 'other')
+const modeHere = (): Mode => modes[here()]
 const asMode = (value: unknown, choices: readonly Mode[], fallback: Mode): Mode => choices.find(m => m === value) ?? fallback
 const MODE_TEXT: Record<Mode, string> = {
   pane: "mdview's pane",
@@ -66,6 +73,7 @@ const keyOf = (unit: number, part: number) => (part ? `u${unit}-${part}` : `u${u
 
 // A working directory the session moved to, kept in the session's state so a reload of the mod keeps it.
 async function remember($: EngineInterface, cwd: string) {
+  if ((await read($, cwdHistory))[0] === cwd) return // unchanged: no write, so no transcript row redraws
   await update($, cwdHistory, list => [cwd, ...(list ?? []).filter(c => c !== cwd)].slice(0, 10))
 }
 
@@ -207,7 +215,7 @@ async function build($: EngineInterface, path: string): Promise<View> {
   if (IMAGE.test(path)) {
     const img = await imagePart($, path, basename(path), '/')
     return img
-      ? { units: [{ level: 0, title: '', slug: '', line: 1, end: 1, plain: '', blocks: [{ line: 1, end: 1, first: '', parts: [img] }] }], pages: [0] }
+      ? { units: [{ level: 0, title: '', slug: '', line: 1, end: 1, plain: '', blocks: [{ line: 1, end: 1, first: '', hash: '', parts: [img] }] }], pages: [0] }
       : note(`This picture can't be drawn here. Open ${link} instead.`)
   }
   let raw: string
@@ -225,7 +233,7 @@ async function build($: EngineInterface, path: string): Promise<View> {
     for (const source of split(src, TEXT_MAX)) {
       const end = line + source.split('\n').length - 1
       const parts: Part[] = [{ kind: 'code', source, path, startLine: line }]
-      units.push({ level: 0, title: '', slug: '', line, end, plain: source.toLowerCase(), blocks: [{ line, end, first: '', parts }] })
+      units.push({ level: 0, title: '', slug: '', line, end, plain: source.toLowerCase(), blocks: [{ line, end, first: '', hash: hashOf(source), parts }] })
       line = end + 1
     }
     return { units, pages: paginate(units.map(u => u.plain.length), PAGE_MAX) }
@@ -236,14 +244,15 @@ async function build($: EngineInterface, path: string): Promise<View> {
     const blocks: Block[] = []
     for (const b of blocksOf(s.text, s.line)) {
       const parts = await sectionParts($, b.text, path)
-      const first = b.text.split('\n').find(l => l.trim())?.trim().replace(/\s+/g, ' ') ?? ''
-      if (parts.length) blocks.push({ line: b.line, end: b.end, first: first.length > 40 ? `${first.slice(0, 40)}…` : first, parts })
+      const first = [...(b.text.split('\n').find(l => l.trim())?.trim().replace(/\s+/g, ' ') ?? '')]
+      const begins = first.length > 40 ? `${first.slice(0, 40).join('')}…` : first.join('')
+      if (parts.length) blocks.push({ line: b.line, end: b.end, first: begins, hash: hashOf(b.text), parts })
     }
     units.push({ level: s.level, title: plainTitle(s.title), slug: s.slug, line: s.line, end: 0, plain: s.text.toLowerCase(), blocks })
   }
   const lines = src.split('\n').length
   units.forEach((u, i) => (u.end = (units[i + 1]?.line ?? lines + 1) - 1))
-  if (!units.length) units.push({ level: 0, title: '', slug: '', line: 1, end: 1, plain: '', blocks: [{ line: 1, end: 1, first: '', parts: [{ kind: 'md', text: '*(empty file)*', hrefs: [] }] }] })
+  if (!units.length) units.push({ level: 0, title: '', slug: '', line: 1, end: 1, plain: '', blocks: [{ line: 1, end: 1, first: '', hash: '', parts: [{ kind: 'md', text: '*(empty file)*', hrefs: [] }] }] })
   const size = (u: Unit) =>
     u.blocks.flatMap(b => b.parts).reduce((n, p) => n + (p.kind === 'md' ? p.text.length : p.kind === 'code' ? p.source.length : p.kind === 'raster' ? p.cells.length : 100), 0)
   return { units, pages: paginate(units.map(size), PAGE_MAX) }
@@ -330,10 +339,17 @@ const warpUrl = (ref: Ref): string => {
 // Opens a file where `mode` says: the pane, Warp's own viewer beside the session, or the app macOS opens it with; when
 // either of the last two cannot, the pane. Says where it went. For the pane, the open starts before any await (see show).
 async function openRef($: EngineInterface, ref: Ref, mode: Mode): Promise<string> {
-  if (mode !== 'pane' && (await openWith($, [mode === 'warp' ? warpUrl(ref) : ref.abs]))) {
-    return mode === 'warp' ? "Warp's viewer, split to the right" : 'the default app'
-  }
-  return `the pane, ${await show($, ref)}`
+  // `open` launches whatever it is handed (a .command runs, a .app starts): the app takes markdown files only
+  if (mode === 'app' && !MD.test(ref.abs)) mode = 'pane'
+  // lazy: the fallback opens the pane after `open` has answered, which on a narrow terminal counts as the mod's own
+  // open and waits for room; checking for an app first (LaunchServices) would keep it the click's
+  if (mode !== 'pane' && (await openWith($, [mode === 'warp' ? warpUrl(ref) : ref.abs]))) return MODE_TEXT[mode]
+  return `${MODE_TEXT.pane}, ${await show($, ref)}`
+}
+
+// A click on a path in the conversation, opened where this terminal's setting says.
+function clickFrom($: EngineInterface) {
+  return (link: { href: string }) => press($, refOf(link.href), modeHere())
 }
 
 // A click on a link: opened where `mode` says, and a toast when the pane has to wait or it fails. The promise goes
@@ -392,8 +408,10 @@ async function findNext($: EngineInterface, query: string) {
 }
 
 export const register: Register = (on, options) => {
-  clickOpens = asMode(options?.clickOpens, ['pane', 'app'], 'pane')
-  clickOpensInWarp = asMode(options?.clickOpensInWarp, ['warp', 'pane', 'app'], 'warp')
+  for (const where of ['warp', 'other'] as const) {
+    const { key, choices } = SETTING[where]
+    modes[where] = asMode((options as Record<string, unknown> | undefined)?.[key], choices, choices[0]!)
+  }
   on('session.start', async ($, e, next) => {
     await homeDir($)
     await remember($, e.cwd)
@@ -406,7 +424,7 @@ export const register: Register = (on, options) => {
       !!(await $.env.get('KITTY_WINDOW_ID'))
     isWarp = (await $.env.get('TERM_PROGRAM')) === 'WarpTerminal'
     tmp = ((await $.env.get('TMPDIR')) ?? '/tmp').replace(/\/+$/, '') || '/tmp'
-    await $.command.register({ name: 'md', description: 'Show a file rendered in a side pane; `mode` switches what a click opens', argumentHint: '<path>[#heading|:line] | mode [pane|app]' })
+    await $.command.register({ name: 'md', description: 'Show a file rendered in a side pane; `mode` switches what a click opens', argumentHint: '<path>[#heading|:line] | mode [warp|pane|app]' })
     await $.tool.register({
       name: 'show',
       description:
@@ -439,8 +457,9 @@ export const register: Register = (on, options) => {
   // A markdown file Claude just wrote: links to it appear, and the pane showing it redraws, at once.
   on('tool.call', async ($, e, next) => {
     const result = await next(e)
-    if (e.tool === 'Write' || e.tool === 'Edit') {
-      if (MD.test(e.file_path) || (isOpen && (await read($, doc))?.path === e.file_path)) $.ui.invalidate('ui.render')
+    const file = (e as { file_path?: unknown }).file_path
+    if ((e.tool === 'Write' || e.tool === 'Edit') && typeof file === 'string') {
+      if (MD.test(file) || (isOpen && (await read($, doc))?.path === file)) $.ui.invalidate('ui.render')
     }
     return result
   })
@@ -451,7 +470,8 @@ export const register: Register = (on, options) => {
     const st = ref ? await $.fs.stat(ref.abs).catch(() => null) : null
     if (!ref || st?.kind !== 'file') return { result: `No such file: ${arg}` }
     try {
-      return { result: `${tilde(ref.abs)}: opened in ${await openRef($, ref, modeHere())}` }
+      // the model's tool views only: Warp's viewer or the pane, never the app (see openRef)
+      return { result: `${tilde(ref.abs)}: opened in ${await openRef($, ref, isWarp ? 'warp' : 'pane')}` }
     } catch (err) {
       return { result: `Could not open it: ${err instanceof Error ? err.message : String(err)}` }
     }
@@ -464,8 +484,7 @@ export const register: Register = (on, options) => {
     const mode = /^mode(?:\s+(\S+))?$/.exec(arg)
     const named = mode ? resolveRef(arg, await $.session.cwd(), await homeDir($), { anyExt: true }) : null
     if (mode && (!named || (await $.fs.stat(named.abs).catch(() => null))?.kind !== 'file')) {
-      const key = isWarp ? 'clickOpensInWarp' : 'clickOpens'
-      const choices: Mode[] = isWarp ? ['warp', 'pane', 'app'] : ['pane', 'app']
+      const { key, choices } = SETTING[here()]
       const now = modeHere()
       const want = mode[1] ?? choices[(choices.indexOf(now) + 1) % choices.length]!
       if (!(choices as string[]).includes(want)) return { text: `Usage: /md mode [${choices.join('|')}]` }
@@ -473,8 +492,7 @@ export const register: Register = (on, options) => {
       const set = await $.config.set({ key: `mdview.${key}`, value: want }).catch((err: unknown) => ({ deny: err instanceof Error ? err.message : String(err) }))
       if (set.deny !== undefined) return { text: `Could not switch: ${set.deny}` }
       const got = asMode(set.value, choices, now)
-      if (isWarp) clickOpensInWarp = got
-      else clickOpens = got
+      modes[here()] = got
       return { text: `A click on a path now opens ${MODE_TEXT[got]} (${key}: ${got})` }
     }
     if (!arg) {
@@ -506,10 +524,12 @@ export const register: Register = (on, options) => {
     columns = Math.max(columns, e.viewport?.columns ?? 0)
     // Clicks reach a plugin only in the fullscreen terminal; elsewhere the engine's own drawing stays.
     if (e.surface !== 'terminal' || !e.viewport?.isFullscreen || !MAYBE_MD.test(e.props.text)) return next(e)
-    const linked = await linkFiles($, e.props.text, [...new Set([await $.session.cwd(), ...(await read($, cwdHistory))])])
+    const now = await $.session.cwd()
+    if (!cwdOf.has(e.requestId)) cwdOf.set(e.requestId, now)
+    const linked = await linkFiles($, e.props.text, [...new Set([cwdOf.get(e.requestId)!, now, ...(await read($, cwdHistory))])])
     if (!linked) return next(e)
     const { Box, Markdown, Text } = $.ui.resolve(e)
-    const follow = (link: { href: string }) => press($, refOf(link.href), modeHere())
+    const follow = clickFrom($)
     return (
       <Box flexDirection="row" marginTop={1}>
         <Box minWidth={2}>
@@ -542,7 +562,7 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column">
         {await next(e)}
         <Box paddingLeft={2}>
-          <Markdown key="open" dimColor text={`⎿  [${tilde(file)}${MARK}](${href})`} pressableLinks={[href]} onLinkPress={link => press($, refOf(link.href), modeHere())} />
+          <Markdown key="open" dimColor text={`⎿  [${tilde(file)}${MARK}](${href})`} pressableLinks={[href]} onLinkPress={clickFrom($)} />
         </Box>
       </Box>
     )
@@ -551,7 +571,9 @@ export const register: Register = (on, options) => {
   // A prompt of yours naming markdown files: your own row, with a line under it that opens them here.
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     if (e.surface !== 'terminal' || !e.viewport?.isFullscreen || e.props.origin.kind !== 'composer' || !MAYBE_MD.test(e.props.text)) return next(e)
-    const linked = await linkFiles($, e.props.text, [...new Set([await $.session.cwd(), ...(await read($, cwdHistory))])])
+    const now = await $.session.cwd()
+    if (!cwdOf.has(e.requestId)) cwdOf.set(e.requestId, now)
+    const linked = await linkFiles($, e.props.text, [...new Set([cwdOf.get(e.requestId)!, now, ...(await read($, cwdHistory))])])
     if (!linked) return next(e)
     const hrefs = linked.hrefs.slice(0, 20)
     const { Box, Markdown } = $.ui.resolve(e)
@@ -564,7 +586,7 @@ export const register: Register = (on, options) => {
             dimColor
             text={`⎿  ${hrefs.map(h => `[${tilde(refOf(h)?.abs ?? h)}${MARK}](${h})`).join(' · ')}`}
             pressableLinks={hrefs}
-            onLinkPress={link => press($, refOf(link.href), modeHere())}
+            onLinkPress={clickFrom($)}
           />
         </Box>
       </Box>
@@ -592,14 +614,15 @@ export const register: Register = (on, options) => {
     const page = Math.min(d.page, pageCount - 1)
     const heads = units.flatMap((u, i) => (u.level > 0 ? [{ u, i }] : []))
     const follow = (link: { href: string }) => press($, refOf(link.href))
-    // The block the edit bar is on: the one beginning as it did, nearest where it was, since the file may have
-    // changed under it (a block that is gone closes the bar rather than move it onto another).
+    // The block the edit bar is on: the one with the same text, nearest where it was, since the file may have
+    // changed above it; when no block has that text any more the bar closes rather than move onto another.
+    // lazy: two blocks of identical text are told apart by the nearer line only; harmless, as either holds that text
     let editAt: { i: number; k: number } | null = null
     if (ed?.path === d.path) {
       let gap = Infinity
       for (const [i, u] of units.entries())
         for (const [k, b] of u.blocks.entries()) {
-          if (b.first !== ed.first || (!b.first && b.line !== ed.line) || Math.abs(b.line - ed.line) >= gap) continue
+          if (b.hash !== ed.hash || Math.abs(b.line - ed.line) >= gap) continue
           gap = Math.abs(b.line - ed.line)
           editAt = { i, k }
         }
@@ -694,7 +717,7 @@ export const register: Register = (on, options) => {
                   {b.parts.map((p, m) => draw(p, keyOf(i, firstPart[k]! + m)))}
                   {Input && (
                     <Box position="absolute" top={0} right={0} display="none" hover={{ display: 'flex' }}>
-                      <Button key={`edit-${i}-${k}`} plain dimColor label="✎" onPress={() => update($, edit, () => ({ path: d.path, line: b.line, first: b.first }))} />
+                      <Button key={`edit-${i}-${k}`} plain dimColor label="✎" onPress={() => update($, edit, () => ({ path: d.path, line: b.line, hash: b.hash }))} />
                     </Box>
                   )}
                 </Box>
