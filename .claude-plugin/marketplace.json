@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "claude-mdview",
-  "description": "mdview: read the markdown files a Claude Code session names, rendered in a side pane.",
+  "description": "mdview: read the markdown files a Claude Code session names, rendered beside it, and edit them by pointing.",
   "owner": {
     "name": "Anji Xu",
     "url": "https://github.com/xuanji86"
@@ -10,8 +10,8 @@
     {
       "name": "mdview",
       "source": "./",
-      "description": "Click a .md path in the conversation to read the file rendered as markdown in a side pane, pictures included.",
-      "version": "0.1.0",
+      "description": "Click a .md path in the Claude Code conversation to read it rendered as markdown beside the session, pictures included, and point at any block to have Claude edit it.",
+      "version": "1.0.0",
       "author": {
         "name": "Anji Xu",
         "url": "https://github.com/xuanji86"
