@@ -349,7 +349,7 @@ describe('pictures', () => {
     await $.command.run({ command: 'md', args: 'a.md' } as never)
     const pane = await $.ui.mount(PANE)
     await pane.press({ key: 'warp' })
-    expect(w.runs.at(-1)).toEqual(['open', '-a', 'Warp', '/w/a.md'])
+    expect(w.runs.at(-1)).toEqual(['open', 'warp://action/open_file_editor?path=%2Fw%2Fa.md'])
     const original = await pane.find({ type: 'Button', text: '↗ original' })
     await pane.press({ key: String(original?.key) })
     expect(w.runs.at(-1)).toEqual(['open', '/w/s.png'])

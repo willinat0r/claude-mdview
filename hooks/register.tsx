@@ -560,7 +560,8 @@ export const register: Register = on => {
           <Button key="close" label="✕" role="dismiss" hotkey="q" onPress={() => $.ui.close({ id: PANE })} />
           {d.back.length > 0 && <Button key="back" label="← Back" hotkey="b" onPress={() => back($)} />}
           {heads.length > 1 && <Button key="toc" label={isTocOpen ? 'Contents ▾' : 'Contents'} hotkey="t" onPress={() => update($, toc, x => !x)} />}
-          {isWarp && <Button key="warp" label="Warp ↗" hotkey="w" onPress={() => openWith($, ['-a', 'Warp', d.path])} />}
+          {/* Warp's own Markdown viewer, split to the right as its "open file layout" setting says (a file:// URL would open a tab) */}
+          {isWarp && <Button key="warp" label="Warp ↗" hotkey="w" onPress={() => openWith($, [`warp://action/open_file_editor?path=${encodeURIComponent(d.path)}`])} />}
           {Input && units.length > 0 && (
             <Button key="find-toggle" label="Find" hotkey="f" onPress={() => update($, find, x => (x ? null : { query: '', at: 0, hits: 0 }))} />
           )}
