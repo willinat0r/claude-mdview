@@ -393,7 +393,7 @@ export const register: Register = (on, options) => {
       !!(await $.env.get('KITTY_WINDOW_ID'))
     isWarp = (await $.env.get('TERM_PROGRAM')) === 'WarpTerminal'
     tmp = ((await $.env.get('TMPDIR')) ?? '/tmp').replace(/\/+$/, '') || '/tmp'
-    await $.command.register({ name: 'md', description: 'Show a file rendered in a side pane', argumentHint: '<path>[#heading|:line]' })
+    await $.command.register({ name: 'md', description: 'Show a file rendered in a side pane; `mode` switches what a click opens', argumentHint: '<path>[#heading|:line] | mode [pane|app]' })
     await $.tool.register({
       name: 'show',
       description:
@@ -450,6 +450,16 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'md' }, async ($, e) => {
     const arg = e.args.trim().replace(/^(['"`])(.*)\1$/, '$2')
+    // `/md mode [pane|app]`: the clickOpens setting, as /config sets it (stored, and the mod reloads with it)
+    const mode = /^mode(?:\s+(\S+))?$/.exec(arg)
+    if (mode) {
+      const want = mode[1] ?? (clickOpens === 'app' ? 'pane' : 'app')
+      if (want !== 'pane' && want !== 'app') return { text: 'Usage: /md mode [pane|app]' }
+      const set = await $.config.set({ key: 'mdview.clickOpens', value: want })
+      if (set.deny) return { text: `Could not switch: ${set.deny}` }
+      clickOpens = want
+      return { text: `A click on a path now opens ${want === 'app' ? 'the app macOS opens .md files with' : isWarp ? "Warp's Markdown viewer" : "mdview's pane"} (clickOpens: ${want})` }
+    }
     if (!arg) {
       const d = await read($, doc)
       if (!d) return { text: 'Usage: /md <path>[#heading|:line]' }

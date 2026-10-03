@@ -34,7 +34,7 @@ renderer.
 | **Editing** | Hover a block (paragraph, list, table, code, picture, heading) and a `✎` shows at its right end; it opens a bar: type what to change and Enter sends it to Claude as your prompt, naming the file, the block's lines and how they begin; Claude edits, the pane redraws |
 | **Other files** | Any text file opens as highlighted code with line numbers |
 | **Live** | A file Claude writes or edits redraws at once; one changed elsewhere within 1.5 s |
-| **`/md`** | `/md <path>[#heading\|:line]` opens any file; `/md` alone reopens the last one |
+| **`/md`** | `/md <path>[#heading\|:line]` opens any file; `/md` alone reopens the last one; `/md mode` switches what a click opens |
 | **Tool** | `mcp__mdview__show` lets Claude open a file in the pane when you ask it to |
 | **Warp** | A click on a path opens Warp's own Markdown viewer split to the right (Warp's "open file layout" setting) instead of the pane: sharp pictures, mermaid, editing. In the pane (`/md`), `Warp ↗` (`w`) does the same |
 
@@ -64,7 +64,7 @@ In `/config`, **mdview › Click opens** picks what a click on a path in the con
 | `pane` (default) | mdview's pane; in Warp, Warp's own Markdown viewer |
 | `app` | The app macOS opens `.md` files with (set it in Finder: Get Info › Open with › Change All) |
 
-Or in `~/.claude/settings.json`: `"pluginConfigs": { "mdview": { "options": { "clickOpens": "app" } } }`.
+Or switch it with `/md mode` (`/md mode pane`, `/md mode app`), which sets the same setting. Or in `~/.claude/settings.json`: `"pluginConfigs": { "mdview": { "options": { "clickOpens": "app" } } }`.
 
 ## Terminals
 

@@ -23,13 +23,14 @@ type World = {
   env: Record<string, string>
   runs: string[][]
   prompts: string[]
+  configs: [string, unknown][]
   cwd: string
   opened: string[]
   invalidated: number
   closed: number
   doc?: { page: number; target: string | null }
 }
-const world = (files: World['files'], env: Record<string, string> = {}): World => ({ files, env, cwd: '/w', runs: [], prompts: [], opened: [], invalidated: 0, closed: 0 })
+const world = (files: World['files'], env: Record<string, string> = {}): World => ({ files, env, cwd: '/w', runs: [], prompts: [], configs: [], opened: [], invalidated: 0, closed: 0 })
 
 // The engine beneath a started session: a tiny file system, the working directory, and the pane calls.
 const start = async ($: { session: { start: (e: never) => Promise<unknown> } }, on: On, w: World) => {
@@ -55,6 +56,7 @@ const start = async ($: { session: { start: (e: never) => Promise<unknown> } }, 
     return { value: typeof f === 'string' ? f : { base64: f.bytes } } as never
   })
   on('prompt.submit', ($, e) => (w.prompts.push(e.text), { text: e.text }) as never)
+  on('config.set', ($, e) => (w.configs.push([e.key, e.value]), { value: e.value }) as never)
   on('command.register', () => ({ value: { command: 'md' } }) as never)
   on('ui.open', ($, e) => (w.opened.push(e.title ?? e.id), { value: { isPlaced: true } }) as never)
     on('ui.close', () => (w.closed++, { value: undefined }))
@@ -389,6 +391,21 @@ describe('pictures', () => {
     expect(w.runs.at(-1)).toEqual(['open', '/w/README.md'])
     expect(w.opened).toEqual([]) // no pane
     await ui.unmount()
+  })
+
+  test('/md mode switches what a click opens, through the same setting /config sets', async ($, on) => {
+    const w = world({ '/w/README.md': '# R' }, {})
+    await start($, on, w)
+    expect(await $.command.run({ command: 'md', args: 'mode' } as never)).toMatchObject({ text: expect.stringContaining('clickOpens: app') })
+    expect(w.configs).toEqual([['mdview.clickOpens', 'app']])
+    const ui = await $.ui.mount(reply('See `README.md`.'))
+    await ui.press({ key: 'r0', link: { href: 'file:///w/README.md' } })
+    expect(w.runs.at(-1)).toEqual(['open', '/w/README.md'])
+    await ui.unmount()
+    expect(await $.command.run({ command: 'md', args: 'mode' } as never)).toMatchObject({ text: expect.stringContaining('clickOpens: pane') })
+    expect(await $.command.run({ command: 'md', args: 'mode pane' } as never)).toMatchObject({ text: expect.stringContaining('pane') })
+    expect(await $.command.run({ command: 'md', args: 'mode nope' } as never)).toMatchObject({ text: 'Usage: /md mode [pane|app]' })
+    expect(w.configs.map(c => c[1])).toEqual(['app', 'pane', 'pane'])
   })
 
   test('outside Warp there is no Warp button', async ($, on) => {
