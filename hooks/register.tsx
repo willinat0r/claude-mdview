@@ -43,8 +43,6 @@ const views = new Map<string, View>() // lazy: the last 8 files drawn, by path, 
 const sizes = new Map<string, { width: number; height: number } | null>() // lazy: a picture's size, never re-read
 let pictures = false // the terminal draws an Image itself (kitty's graphics protocol); elsewhere pictures are Rasters
 let isWarp = false // Warp has a Markdown viewer of its own, a click away from the pane
-let isITerm = false // iTerm2 splits a session for an editor beside Claude Code when asked through AppleScript
-let editorName = 'vim'
 let tmp = '/tmp'
 let made = 0
 
@@ -353,21 +351,6 @@ async function sendEdit($: EngineInterface, path: string, u: Unit, instruction: 
   $.ui.toast('mdview: sent to Claude')
 }
 
-const shellQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
-const appleString = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
-
-// iTerm2 only: a split beside this session running your editor ($EDITOR, else vim) at the line; quitting it closes
-// the split, and the pane redraws from the saved file. The script removes itself before the editor takes over.
-async function editInITerm($: EngineInterface, path: string, line: number) {
-  await update($, edit, () => null)
-  const script = `${tmp}/mdview-edit-${made++}.sh`
-  await $.fs.write(script, `rm -f "$0"\nexec \${EDITOR:-vim} +${line} ${shellQuote(path)}\n`)
-  const command = appleString(`/bin/zsh -l ${shellQuote(script)}`)
-  const apple = `tell application "iTerm2" to tell current session of current window to split vertically with default profile command ${command}`
-  const run = await $.process.run(['osascript', '-e', apple], { timeoutMs: 15_000 }).catch((err: unknown) => ({ exitCode: -1, stderr: String(err) }))
-  if (run.exitCode !== 0) $.ui.toast(`mdview: iTerm2 did not open the editor (${run.stderr.trim().slice(0, 120) || `exit ${run.exitCode}`})`)
-}
-
 // Enter in the find bar: the next section holding the text, wrapping around; a new text starts from the first.
 async function findNext($: EngineInterface, query: string) {
   const d = await read($, doc)
@@ -395,8 +378,6 @@ export const register: Register = on => {
       /ghostty/i.test((await $.env.get('TERM_PROGRAM')) ?? '') ||
       !!(await $.env.get('KITTY_WINDOW_ID'))
     isWarp = (await $.env.get('TERM_PROGRAM')) === 'WarpTerminal'
-    isITerm = (await $.env.get('TERM_PROGRAM')) === 'iTerm.app'
-    editorName = basename(((await $.env.get('EDITOR')) ?? '').trim().split(/\s+/)[0] ?? '') || 'vim'
     tmp = ((await $.env.get('TMPDIR')) ?? '/tmp').replace(/\/+$/, '') || '/tmp'
     await $.command.register({ name: 'md', description: 'Show a file rendered in a side pane', argumentHint: '<path>[#heading|:line]' })
     await $.tool.register({
@@ -654,7 +635,6 @@ export const register: Register = on => {
                           onSubmit={text => sendEdit($, d.path, u, text)}
                         />
                       </Box>
-                      {isITerm && <Button key="edit-vim" label={`${editorName} ↗`} onPress={() => editInITerm($, d.path, u.line)} />}
                       <Button key="edit-cancel" label="✕" onPress={() => update($, edit, () => null)} />
                     </Box>
                   )}
