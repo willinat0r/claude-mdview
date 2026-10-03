@@ -635,8 +635,8 @@ export const register: Register = on => {
             // a blank line between sections and between blocks, as the file itself reads
             <Box key={`sec${i}`} flexDirection="column" marginTop={pages.indexOf(page) === i ? 0 : 1}>
               {u.blocks.map((b, k) => (
-                // each block a hover scope: its ✎ shows while the pointer is over it
-                <Box key={`blk${i}-${k}`} flexDirection="column" marginTop={k ? 1 : 0}>
+                // each block a hover scope: while the pointer is over it, it lights up (as your own prompts do) and shows its ✎
+                <Box key={`blk${i}-${k}`} flexDirection="column" marginTop={k ? 1 : 0} hover={{ backgroundColor: 'userMessageBackground' }}>
                   {ed?.path === d.path && ed.unit === i && ed.block === k && Input && (
                     <Box flexDirection="row" gap={1}>
                       <Box flexGrow={1}>
