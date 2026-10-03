@@ -24,13 +24,16 @@ type World = {
   runs: string[][]
   prompts: string[]
   configs: [string, unknown][]
+  mtimes: Record<string, number>
+  openFails?: boolean
+  configAnswer?: { value: unknown } | { deny: string }
   cwd: string
   opened: string[]
   invalidated: number
   closed: number
   doc?: { page: number; target: string | null }
 }
-const world = (files: World['files'], env: Record<string, string> = {}): World => ({ files, env, cwd: '/w', runs: [], prompts: [], configs: [], opened: [], invalidated: 0, closed: 0 })
+const world = (files: World['files'], env: Record<string, string> = {}): World => ({ files, env, cwd: '/w', runs: [], prompts: [], configs: [], mtimes: {}, opened: [], invalidated: 0, closed: 0 })
 
 // The engine beneath a started session: a tiny file system, the working directory, and the pane calls.
 const start = async ($: { session: { start: (e: never) => Promise<unknown> } }, on: On, w: World) => {
@@ -41,6 +44,7 @@ const start = async ($: { session: { start: (e: never) => Promise<unknown> } }, 
     w.runs.push([...e.argv])
     const out = e.argv[e.argv.indexOf('--out') + 1]
     if (e.argv.includes('--out') && out) w.files[out] = { bytes: BMP_TOP_DOWN }
+    if (e.argv[0] === 'open' && w.openFails) return { value: { exitCode: 1, stdout: '', stderr: 'No application knows how to open it.', isStdoutTruncated: false, isStderrTruncated: false } } as never
     const stdout = e.argv.includes('-g') ? 'x\n  pixelWidth: 100\n  pixelHeight: 50\n' : ''
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } as never
   })
@@ -48,7 +52,7 @@ const start = async ($: { session: { start: (e: never) => Promise<unknown> } }, 
   on('fs.stat', ($, e) => {
     const f = w.files[e.path]
     if (f === undefined) throw new Error(`ENOENT: ${e.path}`)
-    return { value: { kind: 'file', size: typeof f === 'string' ? f.length : 100, mtimeMs: 1, isLink: false } } as never
+    return { value: { kind: 'file', size: typeof f === 'string' ? f.length : 100, mtimeMs: w.mtimes[e.path] ?? 1, isLink: false } } as never
   })
   on('fs.read', ($, e) => {
     const f = w.files[e.path]
@@ -56,7 +60,7 @@ const start = async ($: { session: { start: (e: never) => Promise<unknown> } }, 
     return { value: typeof f === 'string' ? f : { base64: f.bytes } } as never
   })
   on('prompt.submit', ($, e) => (w.prompts.push(e.text), { text: e.text }) as never)
-  on('config.set', ($, e) => (w.configs.push([e.key, e.value]), { value: e.value }) as never)
+  on('config.set', ($, e) => (w.configs.push([e.key, e.value]), w.configAnswer ?? { value: e.value }) as never)
   on('command.register', () => ({ value: { command: 'md' } }) as never)
   on('ui.open', ($, e) => (w.opened.push(e.title ?? e.id), { value: { isPlaced: true } }) as never)
     on('ui.close', () => (w.closed++, { value: undefined }))
@@ -358,65 +362,6 @@ describe('pictures', () => {
     await pane.unmount()
   })
 
-  test('in Warp the pane hands the file to Warp\'s own viewer, and a half-block picture to the default app', async ($, on) => {
-    const w = world({ '/w/a.md': '# A\n\n![shot](s.png)', '/w/s.png': { bytes: PNG_640x480 } }, { TERM_PROGRAM: 'WarpTerminal' })
-    await start($, on, w)
-    await $.command.run({ command: 'md', args: 'a.md' } as never)
-    const pane = await $.ui.mount(PANE)
-    await pane.press({ key: 'warp' })
-    expect(w.runs.at(-1)).toEqual(['open', 'warp://action/open_file_editor?path=%2Fw%2Fa.md'])
-    const original = await pane.find({ type: 'Button', text: '↗ original' })
-    await pane.press({ key: String(original?.key) })
-    expect(w.runs.at(-1)).toEqual(['open', '/w/s.png'])
-    await pane.unmount()
-  })
-
-  test('in Warp a click on a path in the conversation opens Warp\'s viewer, at the line it names', async ($, on) => {
-    const w = world({ '/w/README.md': '# R' }, { TERM_PROGRAM: 'WarpTerminal' })
-    await start($, on, w)
-    const ui = await $.ui.mount(reply('See `README.md:3`.'))
-    await ui.press({ key: 'r0', link: { href: 'file:///w/README.md#L3' } })
-    expect(w.runs.at(-1)).toEqual(['open', 'warp://action/open_file_editor?path=%2Fw%2FREADME.md&line=3'])
-    expect(w.opened).toEqual([]) // no pane
-    await ui.unmount()
-    expect(await $.tool.call({ tool: 'mcp__mdview__show', path: 'README.md' } as never)).toMatchObject({ result: expect.stringContaining('Warp') })
-    expect(w.runs.at(-1)).toEqual(['open', 'warp://action/open_file_editor?path=%2Fw%2FREADME.md'])
-  })
-
-  test('with clickOpens: app, a click on a path hands the file to the app macOS opens it with, in any terminal', { options: { clickOpens: 'app' } }, async ($, on) => {
-    const w = world({ '/w/README.md': '# R' }, { TERM_PROGRAM: 'WarpTerminal' })
-    await start($, on, w)
-    const ui = await $.ui.mount(reply('See `README.md:3`.'))
-    await ui.press({ key: 'r0', link: { href: 'file:///w/README.md#L3' } })
-    expect(w.runs.at(-1)).toEqual(['open', '/w/README.md'])
-    expect(w.opened).toEqual([]) // no pane
-    await ui.unmount()
-  })
-
-  test('/md mode switches what a click opens, through the same setting /config sets', async ($, on) => {
-    const w = world({ '/w/README.md': '# R' }, {})
-    await start($, on, w)
-    expect(await $.command.run({ command: 'md', args: 'mode' } as never)).toMatchObject({ text: expect.stringContaining('clickOpens: app') })
-    expect(w.configs).toEqual([['mdview.clickOpens', 'app']])
-    const ui = await $.ui.mount(reply('See `README.md`.'))
-    await ui.press({ key: 'r0', link: { href: 'file:///w/README.md' } })
-    expect(w.runs.at(-1)).toEqual(['open', '/w/README.md'])
-    await ui.unmount()
-    expect(await $.command.run({ command: 'md', args: 'mode' } as never)).toMatchObject({ text: expect.stringContaining('clickOpens: pane') })
-    expect(await $.command.run({ command: 'md', args: 'mode pane' } as never)).toMatchObject({ text: expect.stringContaining('pane') })
-    expect(await $.command.run({ command: 'md', args: 'mode nope' } as never)).toMatchObject({ text: 'Usage: /md mode [pane|app]' })
-    expect(w.configs.map(c => c[1])).toEqual(['app', 'pane', 'pane'])
-  })
-
-  test('outside Warp there is no Warp button', async ($, on) => {
-    const w = world({ '/w/a.md': '# A' }, { TERM_PROGRAM: 'iTerm.app' })
-    await start($, on, w)
-    await $.command.run({ command: 'md', args: 'a.md' } as never)
-    const pane = await $.ui.mount(PANE)
-    expect(await pane.find({ key: 'warp' })).toBeUndefined()
-    await pane.unmount()
-  })
-
   test('iTerm2 is no kitty-protocol terminal: its pictures are half blocks too', async ($, on) => {
     const w = world({ '/w/a.md': '![shot](s.png)', '/w/s.png': { bytes: PNG_640x480 } }, { TERM_PROGRAM: 'iTerm.app', TERM: 'xterm-256color' })
     await start($, on, w)
@@ -455,6 +400,27 @@ describe('pictures', () => {
 describe('editing', () => {
   const field = (pane: unknown) => pane as { input: (t: { key: string; text: string }) => Promise<unknown> }
 
+  test('the edit bar stays on its block when the file changes above it, and closes when the block is gone', async ($, on) => {
+    const w = world({ '/w/a.md': '# One\n\nalpha\n\nbeta' }, {})
+    await start($, on, w)
+    await $.command.run({ command: 'md', args: 'a.md' } as never)
+    let pane = await $.ui.mount(PANE)
+    await pane.press({ key: 'edit-0-2' }) // "beta", line 5
+    await pane.unmount()
+    w.files['/w/a.md'] = '# One\n\nnew\n\nalpha\n\nbeta'
+    w.mtimes['/w/a.md'] = 2
+    pane = await $.ui.mount(PANE)
+    await field(pane).input({ key: 'edit-input', text: 'shorter' })
+    expect(w.prompts).toEqual(['Edit lines 7-7 of `/w/a.md` in the section "One", which begin "beta": shorter'])
+    await pane.press({ key: 'edit-0-1' }) // "new"
+    await pane.unmount()
+    w.files['/w/a.md'] = '# One\n\nalpha\n\nbeta'
+    w.mtimes['/w/a.md'] = 3
+    pane = await $.ui.mount(PANE)
+    expect(await pane.find({ key: 'edit-input' })).toBeUndefined()
+    await pane.unmount()
+  })
+
   test('each block has a ✎ that shows on hover; it sends the instruction to Claude with the lines and how they begin', async ($, on) => {
     const w = world({ '/w/a.md': '# One\n\nalpha\n\n# Two\n\nbeta  gamma\ndelta' }, {})
     await start($, on, w)
@@ -470,5 +436,111 @@ describe('editing', () => {
     expect(await pane.find({ key: 'edit-input' })).toBeUndefined()
     expect(w.prompts.length).toBe(1)
     await pane.unmount()
+  })
+})
+
+describe('click modes', () => {
+  test('in Warp the pane hands the file to Warp\'s own viewer, and a half-block picture to the default app', async ($, on) => {
+    const w = world({ '/w/a.md': '# A\n\n![shot](s.png)', '/w/s.png': { bytes: PNG_640x480 } }, { TERM_PROGRAM: 'WarpTerminal' })
+    await start($, on, w)
+    await $.command.run({ command: 'md', args: 'a.md' } as never)
+    const pane = await $.ui.mount(PANE)
+    await pane.press({ key: 'warp' })
+    expect(w.runs.at(-1)).toEqual(['open', 'warp://action/open_file_editor?path=%2Fw%2Fa.md'])
+    const original = await pane.find({ type: 'Button', text: '↗ original' })
+    await pane.press({ key: String(original?.key) })
+    expect(w.runs.at(-1)).toEqual(['open', '/w/s.png'])
+    await pane.unmount()
+  })
+
+  test('in Warp a click on a path in the conversation opens Warp\'s viewer, at the line it names', async ($, on) => {
+    const w = world({ '/w/README.md': '# R' }, { TERM_PROGRAM: 'WarpTerminal' })
+    await start($, on, w)
+    const ui = await $.ui.mount(reply('See `README.md:3`.'))
+    await ui.press({ key: 'r0', link: { href: 'file:///w/README.md#L3' } })
+    expect(w.runs.at(-1)).toEqual(['open', 'warp://action/open_file_editor?path=%2Fw%2FREADME.md&line=3'])
+    expect(w.opened).toEqual([]) // no pane
+    await ui.unmount()
+    expect(await $.tool.call({ tool: 'mcp__mdview__show', path: 'README.md' } as never)).toMatchObject({ result: expect.stringContaining('Warp') })
+    expect(w.runs.at(-1)).toEqual(['open', 'warp://action/open_file_editor?path=%2Fw%2FREADME.md'])
+  })
+
+  test('outside Warp there is no Warp button', async ($, on) => {
+    const w = world({ '/w/a.md': '# A' }, { TERM_PROGRAM: 'iTerm.app' })
+    await start($, on, w)
+    await $.command.run({ command: 'md', args: 'a.md' } as never)
+    const pane = await $.ui.mount(PANE)
+    expect(await pane.find({ key: 'warp' })).toBeUndefined()
+    await pane.unmount()
+  })
+
+  test('outside Warp, clickOpens: app hands the file to the app macOS opens it with', { options: { clickOpens: 'app' } }, async ($, on) => {
+    const w = world({ '/w/README.md': '# R' }, { TERM_PROGRAM: 'iTerm.app' })
+    await start($, on, w)
+    const ui = await $.ui.mount(reply('See `README.md:3`.'))
+    await ui.press({ key: 'r0', link: { href: 'file:///w/README.md#L3' } })
+    expect(w.runs.at(-1)).toEqual(['open', '/w/README.md'])
+    expect(w.opened).toEqual([]) // no pane
+    await ui.unmount()
+  })
+
+  test('in Warp, clickOpensInWarp picks the app or the pane instead of Warp\'s viewer', { options: { clickOpensInWarp: 'pane' } }, async ($, on) => {
+    const w = world({ '/w/README.md': '# R' }, { TERM_PROGRAM: 'WarpTerminal' })
+    await start($, on, w)
+    const ui = await $.ui.mount(reply('See `README.md`.'))
+    await ui.press({ key: 'r0', link: { href: 'file:///w/README.md' } })
+    expect(w.opened).toEqual(['README.md'])
+    expect(w.runs).toEqual([])
+    await ui.unmount()
+  })
+
+  test('when the app cannot open the file, the click opens the pane instead', { options: { clickOpens: 'app' } }, async ($, on) => {
+    const w = world({ '/w/notes.mdx': '# N' }, {})
+    w.openFails = true
+    await start($, on, w)
+    const ui = await $.ui.mount(reply('See `notes.mdx`.'))
+    await ui.press({ key: 'r0', link: { href: 'file:///w/notes.mdx' } })
+    expect(w.runs.at(-1)).toEqual(['open', '/w/notes.mdx'])
+    expect(w.opened).toEqual(['notes.mdx'])
+    await ui.unmount()
+  })
+
+  test('/md mode switches between pane and app outside Warp, through the setting /config sets', async ($, on) => {
+    const w = world({ '/w/README.md': '# R' }, {})
+    await start($, on, w)
+    expect(await $.command.run({ command: 'md', args: 'mode' } as never)).toMatchObject({ text: expect.stringContaining('clickOpens: app') })
+    const ui = await $.ui.mount(reply('See `README.md`.'))
+    await ui.press({ key: 'r0', link: { href: 'file:///w/README.md' } })
+    expect(w.runs.at(-1)).toEqual(['open', '/w/README.md'])
+    await ui.unmount()
+    expect(await $.command.run({ command: 'md', args: 'mode' } as never)).toMatchObject({ text: expect.stringContaining('clickOpens: pane') })
+    expect(await $.command.run({ command: 'md', args: 'mode pane' } as never)).toMatchObject({ text: expect.stringContaining('already') })
+    expect(await $.command.run({ command: 'md', args: 'mode warp' } as never)).toMatchObject({ text: 'Usage: /md mode [pane|app]' })
+    expect(w.configs).toEqual([['mdview.clickOpens', 'app'], ['mdview.clickOpens', 'pane']]) // no write when nothing changes
+  })
+
+  test('/md mode cycles Warp\'s viewer, the pane and the app in Warp', async ($, on) => {
+    const w = world({}, { TERM_PROGRAM: 'WarpTerminal' })
+    await start($, on, w)
+    for (const want of ['pane', 'app', 'warp']) {
+      expect(await $.command.run({ command: 'md', args: 'mode' } as never)).toMatchObject({ text: expect.stringContaining(`clickOpensInWarp: ${want}`) })
+    }
+    expect(w.configs.map(([k, v]) => `${k}=${v}`)).toEqual(['mdview.clickOpensInWarp=pane', 'mdview.clickOpensInWarp=app', 'mdview.clickOpensInWarp=warp'])
+  })
+
+  test('/md mode reports a refusal, and the value the setting really took', async ($, on) => {
+    const w = world({}, {})
+    await start($, on, w)
+    w.configAnswer = { deny: 'locked by policy' }
+    expect(await $.command.run({ command: 'md', args: 'mode app' } as never)).toMatchObject({ text: 'Could not switch: locked by policy' })
+    w.configAnswer = { value: 'pane' }
+    expect(await $.command.run({ command: 'md', args: 'mode app' } as never)).toMatchObject({ text: expect.stringContaining('clickOpens: pane') })
+  })
+
+  test('a file named mode opens instead of switching', async ($, on) => {
+    const w = world({ '/w/mode': 'plain' }, {})
+    await start($, on, w)
+    expect(await $.command.run({ command: 'md', args: 'mode' } as never)).toMatchObject({ text: 'Showing /w/mode' })
+    expect(w.configs).toEqual([])
   })
 })

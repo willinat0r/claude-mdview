@@ -35,7 +35,7 @@ Claude 常把计划、报告、笔记写成 markdown 文件，并在回复里给
 | **自动刷新** | Claude 写或改的文件立即刷新;外部修改最多 1.5 秒后刷新 |
 | **`/md`** | `/md <路径>[#标题\|:行号]` 打开任意文件;不带参数则重新打开上一个;`/md mode` 切换单击打开方式 |
 | **工具** | `mcp__mdview__show`:你让 Claude 打开某个文件时，它可以直接在 pane 里打开 |
-| **Warp** | 单击路径不开 pane,而是在右侧分栏打开 Warp 自带的 Markdown 查看器(取决于 Warp 的“打开文件布局”设置):图片清晰、mermaid 能画、还能编辑。在 pane 里(`/md`)点 `Warp ↗`(`w`)效果一样 |
+| **Warp** | 默认单击路径会在右侧分栏打开 Warp 自带的 Markdown 查看器(取决于 Warp 的“打开文件布局”设置):图片清晰、mermaid 能画、还能编辑;也可以改成 pane 或默认程序，见[设置](#设置)。在 pane 里点 `Warp ↗`(`w`)效果一样 |
 
 ## 安装
 
@@ -56,14 +56,16 @@ git clone https://github.com/xuanji86/claude-mdview ~/Desktop/claude-mdview
 
 ## 设置
 
-在 `/config` 里的 **mdview › Click opens** 选择单击对话中的路径时打开什么：
+单击对话中的路径时打开什么，可以在 `/config` 里设(**Click opens** 和 **Click opens (Warp)** 两项),也可以用 `/md mode`
+切换当前终端对应的那一项(只打 `/md mode` 就切到下一个选项):
 
-| | |
+| 设置 | 选项 |
 | --- | --- |
-| `pane`(默认) | mdview 的 pane;在 Warp 里是 Warp 自带的 Markdown 查看器 |
-| `app` | macOS 为 `.md` 设定的默认程序(在 Finder 里：显示简介 › 打开方式 › 全部更改) |
+| `clickOpens`(Warp 以外) | `pane`(默认):mdview 的 pane · `app`:macOS 为 `.md` 设定的默认程序 |
+| `clickOpensInWarp` | `warp`(默认):Warp 自带的 Markdown 查看器，在右侧分栏 · `pane` · `app` |
 
-也可以用 `/md mode` 切换(或 `/md mode pane`、`/md mode app`),改的是同一个设置。还可以写进 `~/.claude/settings.json`:`"pluginConfigs": { "mdview": { "options": { "clickOpens": "app" } } }`。
+默认程序或 Warp 打不开时，会改为打开 pane。要换默认程序，在 Finder 里：显示简介 › 打开方式 › 全部更改。默认程序总是从文件开头打开;
+`:行号` 只在 Warp 查看器和 pane 里有效。
 
 ## 终端
 

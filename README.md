@@ -36,7 +36,7 @@ renderer.
 | **Live** | A file Claude writes or edits redraws at once; one changed elsewhere within 1.5 s |
 | **`/md`** | `/md <path>[#heading\|:line]` opens any file; `/md` alone reopens the last one; `/md mode` switches what a click opens |
 | **Tool** | `mcp__mdview__show` lets Claude open a file in the pane when you ask it to |
-| **Warp** | A click on a path opens Warp's own Markdown viewer split to the right (Warp's "open file layout" setting) instead of the pane: sharp pictures, mermaid, editing. In the pane (`/md`), `Warp ↗` (`w`) does the same |
+| **Warp** | By default a click on a path opens Warp's own Markdown viewer split to the right (Warp's "open file layout" setting): sharp pictures, mermaid, editing; see [Configure](#configure) for the pane or the app. In the pane, `Warp ↗` (`w`) does the same |
 
 ## Install
 
@@ -57,14 +57,16 @@ or for one session: `claude --plugin-dir ~/Desktop/claude-mdview`.
 
 ## Configure
 
-In `/config`, **mdview › Click opens** picks what a click on a path in the conversation opens:
+What a click on a path in the conversation opens, set in `/config` (rows **Click opens** and **Click opens (Warp)**)
+or with `/md mode`, which switches this terminal's row (`/md mode` alone moves to the next choice):
 
-| | |
+| Setting | Choices |
 | --- | --- |
-| `pane` (default) | mdview's pane; in Warp, Warp's own Markdown viewer |
-| `app` | The app macOS opens `.md` files with (set it in Finder: Get Info › Open with › Change All) |
+| `clickOpens` (outside Warp) | `pane` (default): mdview's pane · `app`: the app macOS opens `.md` files with |
+| `clickOpensInWarp` | `warp` (default): Warp's own Markdown viewer, split to the right · `pane` · `app` |
 
-Or switch it with `/md mode` (`/md mode pane`, `/md mode app`), which sets the same setting. Or in `~/.claude/settings.json`: `"pluginConfigs": { "mdview": { "options": { "clickOpens": "app" } } }`.
+When the app or Warp cannot open a file, the click opens the pane instead. To change the app, in Finder: Get Info ›
+Open with › Change All. The app opens the file at its top: a `:line` goes to Warp's viewer and the pane only.
 
 ## Terminals
 

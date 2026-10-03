@@ -5,11 +5,13 @@ export type MdviewDoc = { path: string; page: number; target: string | null; bac
 // The find bar: open or not, what was last looked for, and which hit is shown.
 export type MdviewFind = { query: string; at: number; hits: number }
 
-// The block whose ✎ was pressed (by section and block within it): its edit bar is open.
-export type MdviewEdit = { path: string; unit: number; block: number }
+// The block whose ✎ was pressed, by the line it began on and how it begins (found again if the file changes): its
+// edit bar is open.
+export type MdviewEdit = { path: string; line: number; first: string }
 
 declare module 'claude-code' {
   interface PluginState {
-    mdview: { doc: MdviewDoc | null; rev: number; toc: boolean; find: MdviewFind | null; edit: MdviewEdit | null }
+    // `cwds`: the working directories the session has had, latest first, kept across reloads of the mod
+    mdview: { doc: MdviewDoc | null; rev: number; toc: boolean; find: MdviewFind | null; edit: MdviewEdit | null; cwds: string[] }
   }
 }

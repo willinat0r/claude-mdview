@@ -12,6 +12,7 @@ const rev = atom({ plugin: 'mdview', key: 'rev' } as const, 0)
 const toc = atom({ plugin: 'mdview', key: 'toc' } as const, false)
 const find = atom({ plugin: 'mdview', key: 'find' } as const, null as MdviewFind | null)
 const edit = atom({ plugin: 'mdview', key: 'edit' } as const, null as MdviewEdit | null)
+const cwdHistory = atom({ plugin: 'mdview', key: 'cwds' } as const, [] as string[])
 
 const TEXT_MAX = 9_000 // a Markdown or Code element takes at most 10,000 characters
 const PAGE_MAX = 60_000 // a page of a long file: a whole tree tops out near 100k characters
@@ -40,26 +41,33 @@ let columns = 0 // the widest the terminal has been seen
 let paneColumns = 80
 let isOpen = false
 const known = new Set<string>() // files seen to exist
-const cwds: string[] = [] // working directories this session has had, latest first
-const cwdOf = new Map<string, string>() // a reply's working directory when first drawn
 const views = new Map<string, View>() // lazy: the last 8 files drawn, by path, mtime and width
 const sizes = new Map<string, { width: number; height: number } | null>() // lazy: a picture's size, never re-read
 let pictures = false // the terminal draws an Image itself (kitty's graphics protocol); elsewhere pictures are Rasters
 let isWarp = false // Warp has a Markdown viewer of its own, a click away from the pane
-let clickOpens: 'pane' | 'app' = 'pane' // userConfig: what a click on a path in the conversation opens
+// What a click on a path in the conversation opens (userConfig): outside Warp `clickOpens`, in Warp `clickOpensInWarp`.
+type Mode = 'pane' | 'warp' | 'app'
+let clickOpens: Mode = 'pane'
+let clickOpensInWarp: Mode = 'warp'
+const modeHere = (): Mode => (isWarp ? clickOpensInWarp : clickOpens)
+const asMode = (value: unknown, choices: readonly Mode[], fallback: Mode): Mode => choices.find(m => m === value) ?? fallback
+const MODE_TEXT: Record<Mode, string> = {
+  pane: "mdview's pane",
+  warp: "Warp's Markdown viewer",
+  app: 'the app macOS opens .md files with',
+}
 let tmp = '/tmp'
 let made = 0
 
-const remember = (cwd: string) => {
-  const i = cwds.indexOf(cwd)
-  if (i >= 0) cwds.splice(i, 1)
-  cwds.unshift(cwd)
-  cwds.length = Math.min(cwds.length, 10)
-}
 const tilde = (p: string): string => (home && p.startsWith(home + '/') ? '~' + p.slice(home.length) : p)
 const plainTitle = (t: string): string => t.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[`*~]/g, '')
 const note = (text: string): View => ({ note: text })
 const keyOf = (unit: number, part: number) => (part ? `u${unit}-${part}` : `u${unit}`)
+
+// A working directory the session moved to, kept in the session's state so a reload of the mod keeps it.
+async function remember($: EngineInterface, cwd: string) {
+  await update($, cwdHistory, list => [cwd, ...(list ?? []).filter(c => c !== cwd)].slice(0, 10))
+}
 
 async function homeDir($: EngineInterface) {
   return (home ||= (await $.env.get('HOME')) ?? '')
@@ -312,13 +320,6 @@ async function show($: EngineInterface, ref: Ref | null): Promise<string> {
   return placed
 }
 
-// A click on a link: the file in the pane, and a toast when that fails or the pane has to wait. The promise goes
-// back to the press, so the open is part of answering it.
-function press($: EngineInterface, href: string): Promise<unknown> {
-  return show($, refOf(href))
-    .then(placed => placed.startsWith('waiting') && $.ui.toast(`mdview: ${placed}`))
-    .catch((err: unknown) => $.ui.toast(`mdview: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200)))
-}
 
 // Warp's own Markdown viewer, split to the right as its "open file layout" setting says (a file:// URL would open a tab).
 const warpUrl = (ref: Ref): string => {
@@ -326,13 +327,22 @@ const warpUrl = (ref: Ref): string => {
   return `warp://action/open_file_editor?path=${encodeURIComponent(ref.abs)}${line ? `&line=${line}` : ''}`
 }
 
-// A click on a path in the conversation: with `clickOpens: app`, the app macOS opens it with; else in Warp, Warp's own
-// viewer beside it, and elsewhere the pane.
-function pressFromTranscript($: EngineInterface, href: string): Promise<unknown> {
-  const ref = refOf(href)
-  if (clickOpens === 'app') return ref ? openWith($, [ref.abs]) : Promise.resolve()
-  if (!isWarp) return press($, href)
-  return ref ? openWith($, [warpUrl(ref)]) : Promise.resolve()
+// Opens a file where `mode` says: the pane, Warp's own viewer beside the session, or the app macOS opens it with; when
+// either of the last two cannot, the pane. Says where it went. For the pane, the open starts before any await (see show).
+async function openRef($: EngineInterface, ref: Ref, mode: Mode): Promise<string> {
+  if (mode !== 'pane' && (await openWith($, [mode === 'warp' ? warpUrl(ref) : ref.abs]))) {
+    return mode === 'warp' ? "Warp's viewer, split to the right" : 'the default app'
+  }
+  return `the pane, ${await show($, ref)}`
+}
+
+// A click on a link: opened where `mode` says, and a toast when the pane has to wait or it fails. The promise goes
+// back to the press, so the open is part of answering it.
+function press($: EngineInterface, ref: Ref | null, mode: Mode = 'pane'): Promise<unknown> {
+  if (!ref) return Promise.resolve()
+  return openRef($, ref, mode)
+    .then(where => where.includes('waiting') && $.ui.toast(`mdview: ${where}`))
+    .catch((err: unknown) => $.ui.toast(`mdview: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200)))
 }
 
 async function back($: EngineInterface) {
@@ -347,10 +357,12 @@ async function back($: EngineInterface) {
   void scrollTo($, null)
 }
 
-// Hands a file to a macOS app (`open`): the default one for its type, or the one `-a` names; a failure is a toast.
-async function openWith($: EngineInterface, args: string[]) {
+// Hands a file or URL to macOS (`open`): the app it opens that kind with; false, after a toast, when that fails.
+async function openWith($: EngineInterface, args: string[]): Promise<boolean> {
   const run = await $.process.run(['open', ...args], { timeoutMs: 10_000 }).catch((err: unknown) => ({ exitCode: -1, stderr: String(err) }))
-  if (run.exitCode !== 0) $.ui.toast(`mdview: could not open it (${run.stderr.trim().slice(0, 120) || `exit ${run.exitCode}`})`)
+  if (run.exitCode === 0) return true
+  $.ui.toast(`mdview: could not open it (${run.stderr.trim().slice(0, 120) || `exit ${run.exitCode}`})`)
+  return false
 }
 
 // ✎ then Enter: the instruction goes to Claude as your own prompt, naming the file, the block's lines and how it begins.
@@ -380,10 +392,11 @@ async function findNext($: EngineInterface, query: string) {
 }
 
 export const register: Register = (on, options) => {
-  clickOpens = options.clickOpens === 'app' ? 'app' : 'pane'
+  clickOpens = asMode(options?.clickOpens, ['pane', 'app'], 'pane')
+  clickOpensInWarp = asMode(options?.clickOpensInWarp, ['warp', 'pane', 'app'], 'warp')
   on('session.start', async ($, e, next) => {
     await homeDir($)
-    remember(e.cwd)
+    await remember($, e.cwd)
     // As Claude Code decides it: kitty or Ghostty, or forced on (iTerm2 3.7 draws kitty pictures; Warp can't place them)
     const forced = (await $.env.get('CLAUDE_CODE_FORCE_TERMINAL_IMAGES')) ?? ''
     pictures =
@@ -418,8 +431,8 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('classic.CwdChanged', ($, e, next) => {
-    remember(e.new_cwd)
+  on('classic.CwdChanged', async ($, e, next) => {
+    await remember($, e.new_cwd)
     return next(e)
   })
 
@@ -437,28 +450,32 @@ export const register: Register = (on, options) => {
     const ref = resolveRef(arg, await $.session.cwd(), await homeDir($), { anyExt: true })
     const st = ref ? await $.fs.stat(ref.abs).catch(() => null) : null
     if (!ref || st?.kind !== 'file') return { result: `No such file: ${arg}` }
-    if (isWarp) {
-      await openWith($, [warpUrl(ref)])
-      return { result: `${tilde(ref.abs)}: opened in Warp's viewer, split to the right` }
-    }
     try {
-      return { result: `${tilde(ref.abs)}: pane ${await show($, ref)}` }
+      return { result: `${tilde(ref.abs)}: opened in ${await openRef($, ref, modeHere())}` }
     } catch (err) {
-      return { result: `Could not open the pane: ${err instanceof Error ? err.message : String(err)}` }
+      return { result: `Could not open it: ${err instanceof Error ? err.message : String(err)}` }
     }
   })
 
   on('command.run', { command: 'md' }, async ($, e) => {
     const arg = e.args.trim().replace(/^(['"`])(.*)\1$/, '$2')
-    // `/md mode [pane|app]`: the clickOpens setting, as /config sets it (stored, and the mod reloads with it)
+    // `/md mode [choice]`: the click setting of this terminal, as /config sets it (stored; the mod reloads with it).
+    // A file of that name wins.
     const mode = /^mode(?:\s+(\S+))?$/.exec(arg)
-    if (mode) {
-      const want = mode[1] ?? (clickOpens === 'app' ? 'pane' : 'app')
-      if (want !== 'pane' && want !== 'app') return { text: 'Usage: /md mode [pane|app]' }
-      const set = await $.config.set({ key: 'mdview.clickOpens', value: want })
-      if (set.deny) return { text: `Could not switch: ${set.deny}` }
-      clickOpens = want
-      return { text: `A click on a path now opens ${want === 'app' ? 'the app macOS opens .md files with' : isWarp ? "Warp's Markdown viewer" : "mdview's pane"} (clickOpens: ${want})` }
+    const named = mode ? resolveRef(arg, await $.session.cwd(), await homeDir($), { anyExt: true }) : null
+    if (mode && (!named || (await $.fs.stat(named.abs).catch(() => null))?.kind !== 'file')) {
+      const key = isWarp ? 'clickOpensInWarp' : 'clickOpens'
+      const choices: Mode[] = isWarp ? ['warp', 'pane', 'app'] : ['pane', 'app']
+      const now = modeHere()
+      const want = mode[1] ?? choices[(choices.indexOf(now) + 1) % choices.length]!
+      if (!(choices as string[]).includes(want)) return { text: `Usage: /md mode [${choices.join('|')}]` }
+      if (want === now) return { text: `A click on a path already opens ${MODE_TEXT[now]} (${key}: ${now})` }
+      const set = await $.config.set({ key: `mdview.${key}`, value: want }).catch((err: unknown) => ({ deny: err instanceof Error ? err.message : String(err) }))
+      if (set.deny !== undefined) return { text: `Could not switch: ${set.deny}` }
+      const got = asMode(set.value, choices, now)
+      if (isWarp) clickOpensInWarp = got
+      else clickOpens = got
+      return { text: `A click on a path now opens ${MODE_TEXT[got]} (${key}: ${got})` }
     }
     if (!arg) {
       const d = await read($, doc)
@@ -489,13 +506,10 @@ export const register: Register = (on, options) => {
     columns = Math.max(columns, e.viewport?.columns ?? 0)
     // Clicks reach a plugin only in the fullscreen terminal; elsewhere the engine's own drawing stays.
     if (e.surface !== 'terminal' || !e.viewport?.isFullscreen || !MAYBE_MD.test(e.props.text)) return next(e)
-    const now = await $.session.cwd()
-    remember(now)
-    if (!cwdOf.has(e.requestId)) cwdOf.set(e.requestId, now)
-    const linked = await linkFiles($, e.props.text, [...new Set([cwdOf.get(e.requestId)!, ...cwds])])
+    const linked = await linkFiles($, e.props.text, [...new Set([await $.session.cwd(), ...(await read($, cwdHistory))])])
     if (!linked) return next(e)
     const { Box, Markdown, Text } = $.ui.resolve(e)
-    const follow = (link: { href: string }) => pressFromTranscript($, link.href)
+    const follow = (link: { href: string }) => press($, refOf(link.href), modeHere())
     return (
       <Box flexDirection="row" marginTop={1}>
         <Box minWidth={2}>
@@ -528,7 +542,7 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column">
         {await next(e)}
         <Box paddingLeft={2}>
-          <Markdown key="open" dimColor text={`⎿  [${tilde(file)}${MARK}](${href})`} pressableLinks={[href]} onLinkPress={link => pressFromTranscript($, link.href)} />
+          <Markdown key="open" dimColor text={`⎿  [${tilde(file)}${MARK}](${href})`} pressableLinks={[href]} onLinkPress={link => press($, refOf(link.href), modeHere())} />
         </Box>
       </Box>
     )
@@ -537,7 +551,7 @@ export const register: Register = (on, options) => {
   // A prompt of yours naming markdown files: your own row, with a line under it that opens them here.
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     if (e.surface !== 'terminal' || !e.viewport?.isFullscreen || e.props.origin.kind !== 'composer' || !MAYBE_MD.test(e.props.text)) return next(e)
-    const linked = await linkFiles($, e.props.text, [...new Set([await $.session.cwd(), ...cwds])])
+    const linked = await linkFiles($, e.props.text, [...new Set([await $.session.cwd(), ...(await read($, cwdHistory))])])
     if (!linked) return next(e)
     const hrefs = linked.hrefs.slice(0, 20)
     const { Box, Markdown } = $.ui.resolve(e)
@@ -550,7 +564,7 @@ export const register: Register = (on, options) => {
             dimColor
             text={`⎿  ${hrefs.map(h => `[${tilde(refOf(h)?.abs ?? h)}${MARK}](${h})`).join(' · ')}`}
             pressableLinks={hrefs}
-            onLinkPress={link => pressFromTranscript($, link.href)}
+            onLinkPress={link => press($, refOf(link.href), modeHere())}
           />
         </Box>
       </Box>
@@ -577,7 +591,19 @@ export const register: Register = (on, options) => {
     const pageCount = (pages.at(-1) ?? 0) + 1
     const page = Math.min(d.page, pageCount - 1)
     const heads = units.flatMap((u, i) => (u.level > 0 ? [{ u, i }] : []))
-    const follow = (link: { href: string }) => press($, link.href)
+    const follow = (link: { href: string }) => press($, refOf(link.href))
+    // The block the edit bar is on: the one beginning as it did, nearest where it was, since the file may have
+    // changed under it (a block that is gone closes the bar rather than move it onto another).
+    let editAt: { i: number; k: number } | null = null
+    if (ed?.path === d.path) {
+      let gap = Infinity
+      for (const [i, u] of units.entries())
+        for (const [k, b] of u.blocks.entries()) {
+          if (b.first !== ed.first || (!b.first && b.line !== ed.line) || Math.abs(b.line - ed.line) >= gap) continue
+          gap = Math.abs(b.line - ed.line)
+          editAt = { i, k }
+        }
+    }
 
     const pager = (where: 'top' | 'bottom') =>
       pageCount > 1 ? (
@@ -651,7 +677,7 @@ export const register: Register = (on, options) => {
               {u.blocks.map((b, k) => (
                 // each block a hover scope: while the pointer is over it, it lights up (as your own prompts do) and shows its ✎
                 <Box key={`blk${i}-${k}`} flexDirection="column" marginTop={k ? 1 : 0} hover={{ backgroundColor: 'userMessageBackground' }}>
-                  {ed?.path === d.path && ed.unit === i && ed.block === k && Input && (
+                  {editAt?.i === i && editAt.k === k && Input && (
                     <Box flexDirection="row" gap={1}>
                       <Box flexGrow={1}>
                         <Input
@@ -668,7 +694,7 @@ export const register: Register = (on, options) => {
                   {b.parts.map((p, m) => draw(p, keyOf(i, firstPart[k]! + m)))}
                   {Input && (
                     <Box position="absolute" top={0} right={0} display="none" hover={{ display: 'flex' }}>
-                      <Button key={`edit-${i}-${k}`} plain dimColor label="✎" onPress={() => update($, edit, () => ({ path: d.path, unit: i, block: k }))} />
+                      <Button key={`edit-${i}-${k}`} plain dimColor label="✎" onPress={() => update($, edit, () => ({ path: d.path, line: b.line, first: b.first }))} />
                     </Box>
                   )}
                 </Box>

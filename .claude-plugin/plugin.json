@@ -20,13 +20,24 @@
   "userConfig": {
     "clickOpens": {
       "title": "Click opens",
-      "description": "What a click on a .md path in the conversation opens: pane = mdview's side pane (in Warp, Warp's own Markdown viewer); app = the app macOS opens .md files with",
+      "description": "Outside Warp, what a click on a .md path in the conversation opens: pane = mdview's side pane; app = the app macOS opens .md files with",
       "type": "string",
       "options": [
         "pane",
         "app"
       ],
       "default": "pane"
+    },
+    "clickOpensInWarp": {
+      "title": "Click opens (Warp)",
+      "description": "In Warp, what a click on a .md path in the conversation opens: warp = Warp's own Markdown viewer, split to the right; pane = mdview's side pane; app = the app macOS opens .md files with",
+      "type": "string",
+      "options": [
+        "warp",
+        "pane",
+        "app"
+      ],
+      "default": "warp"
     }
   }
 }
