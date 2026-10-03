@@ -623,7 +623,8 @@ export const register: Register = on => {
           pages[i] !== page
             ? []
             : [
-                <Box key={`sec${i}`} flexDirection="column">
+                // a blank line between sections, as the file itself reads, so each ✎ sits clear of the section above
+                <Box key={`sec${i}`} flexDirection="column" marginTop={pages.indexOf(page) === i ? 0 : 1}>
                   {editing === i && Input && (
                     <Box flexDirection="row" gap={1}>
                       <Box flexGrow={1}>
