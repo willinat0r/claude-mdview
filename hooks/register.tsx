@@ -24,7 +24,7 @@ const ANY_IMAGE = /!\[([^\]\n]*)\]\(/g
 type Part =
   | { kind: 'md'; text: string; hrefs: string[] }
   | { kind: 'img'; file: string; alt: string; columns: number; rows: number }
-  | { kind: 'raster'; cells: string; alt: string; columns: number; rows: number }
+  | { kind: 'raster'; file: string; cells: string; alt: string; columns: number; rows: number }
   | { kind: 'code'; source: string; path: string; startLine: number }
 // A stretch the pane jumps to: a section of a markdown file, or a run of lines of any other.
 type Unit = { level: number; title: string; slug: string; line: number; plain: string; parts: Part[] }
@@ -41,6 +41,7 @@ const cwdOf = new Map<string, string>() // a reply's working directory when firs
 const views = new Map<string, View>() // lazy: the last 8 files drawn, by path, mtime and width
 const sizes = new Map<string, { width: number; height: number } | null>() // lazy: a picture's size, never re-read
 let pictures = false // the terminal draws an Image itself (kitty's graphics protocol); elsewhere pictures are Rasters
+let isWarp = false // Warp has a Markdown viewer of its own, a click away from the pane
 let tmp = '/tmp'
 let made = 0
 
@@ -152,7 +153,7 @@ async function imagePart($: EngineInterface, src: string, alt: string, base: str
   const px = bytes ? bmpPixels((Uint8Array as unknown as { fromBase64: (s: string) => Uint8Array }).fromBase64(bytes.base64)) : null
   if (!px) return null
   const cells = new Uint8Array(halfBlocks(px, box.columns, box.rows).buffer) as Uint8Array & { toBase64: () => string }
-  return { kind: 'raster', cells: cells.toBase64(), alt, ...box }
+  return { kind: 'raster', file: ref.abs, cells: cells.toBase64(), alt, ...box }
 }
 
 // One section of a markdown file as the pane draws it: HTML and too-wide tables turned to markdown, local PNGs on
@@ -315,6 +316,12 @@ async function back($: EngineInterface) {
   void scrollTo($, null)
 }
 
+// Hands a file to a macOS app (`open`): the default one for its type, or the one `-a` names; a failure is a toast.
+async function openWith($: EngineInterface, args: string[]) {
+  const run = await $.process.run(['open', ...args], { timeoutMs: 10_000 }).catch((err: unknown) => ({ exitCode: -1, stderr: String(err) }))
+  if (run.exitCode !== 0) $.ui.toast(`mdview: could not open it (${run.stderr.trim().slice(0, 120) || `exit ${run.exitCode}`})`)
+}
+
 // Enter in the find bar: the next section holding the text, wrapping around; a new text starts from the first.
 async function findNext($: EngineInterface, query: string) {
   const d = await read($, doc)
@@ -341,6 +348,7 @@ export const register: Register = on => {
       /kitty/i.test((await $.env.get('TERM')) ?? '') ||
       /ghostty/i.test((await $.env.get('TERM_PROGRAM')) ?? '') ||
       !!(await $.env.get('KITTY_WINDOW_ID'))
+    isWarp = (await $.env.get('TERM_PROGRAM')) === 'WarpTerminal'
     tmp = ((await $.env.get('TMPDIR')) ?? '/tmp').replace(/\/+$/, '') || '/tmp'
     await $.command.register({ name: 'md', description: 'Show a file rendered in a side pane', argumentHint: '<path>[#heading|:line]' })
     await $.tool.register({
@@ -525,7 +533,10 @@ export const register: Register = on => {
       if (p.kind === 'code') return <Code key={key} source={p.source} path={p.path} startLine={p.startLine} wrap="wrap" />
       if (p.kind === 'raster')
         return Raster ? (
-          <Raster key={key} cells={p.cells} columns={p.columns} rows={p.rows} />
+          <Box key={`${key}-box`} flexDirection="column" alignItems="flex-start">
+            <Raster key={key} cells={p.cells} columns={p.columns} rows={p.rows} />
+            <Button key={`${key}-original`} plain dimColor label="↗ original" onPress={() => openWith($, [p.file])} />
+          </Box>
         ) : (
           <Text key={key} dimColor>{`[picture: ${p.alt}]`}</Text>
         )
@@ -549,6 +560,7 @@ export const register: Register = on => {
           <Button key="close" label="✕" role="dismiss" hotkey="q" onPress={() => $.ui.close({ id: PANE })} />
           {d.back.length > 0 && <Button key="back" label="← Back" hotkey="b" onPress={() => back($)} />}
           {heads.length > 1 && <Button key="toc" label={isTocOpen ? 'Contents ▾' : 'Contents'} hotkey="t" onPress={() => update($, toc, x => !x)} />}
+          {isWarp && <Button key="warp" label="Warp ↗" hotkey="w" onPress={() => openWith($, ['-a', 'Warp', d.path])} />}
           {Input && units.length > 0 && (
             <Button key="find-toggle" label="Find" hotkey="f" onPress={() => update($, find, x => (x ? null : { query: '', at: 0, hits: 0 }))} />
           )}

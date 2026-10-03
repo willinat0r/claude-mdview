@@ -34,6 +34,7 @@ Claude 常把计划、报告、笔记写成 markdown 文件，并在回复里给
 | **自动刷新** | Claude 写或改的文件立即刷新;外部修改最多 1.5 秒后刷新 |
 | **`/md`** | `/md <路径>[#标题\|:行号]` 打开任意文件;不带参数则重新打开上一个 |
 | **工具** | `mcp__mdview__show`:你让 Claude 打开某个文件时，它可以直接在 pane 里打开 |
+| **Warp** | `Warp ↗`(`w`)把文件交给 Warp 自带的 Markdown 查看器，在新标签页里打开，图片清晰、mermaid 也能画 |
 
 ## 安装
 
@@ -58,7 +59,7 @@ git clone https://github.com/xuanji86/claude-mdview ~/Desktop/claude-mdview
 | --- | --- |
 | Ghostty、kitty | 终端自己画的真图(kitty 图片协议) |
 | iTerm2 3.7+ | 同上，但要只对 iTerm2 设 `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1`,比如在 `~/.zshrc` 里加：`[[ $TERM_PROGRAM == iTerm.app ]] && export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` |
-| Warp 及其他 | 彩色半格色块(`▀`,每格两个像素):认得出，但不清晰 |
+| Warp 及其他 | 彩色半格色块(`▀`,每格两个像素):认得出，但不清晰;色块下面的 `↗ original` 用默认程序打开原图。在 Warp 里也可以点 `Warp ↗`,用 Warp 自带的查看器看整份文件 |
 
 Claude Code 默认只在 kitty 和 Ghostty 里画图。iTerm2 3.7 支持 kitty 图片协议和它的 Unicode 占位符，所以强制开启可以用;Warp
 还不支持占位符([warpdotdev/Warp#6210](https://github.com/warpdotdev/Warp/issues/6210)),强制开启会把界面搞乱。

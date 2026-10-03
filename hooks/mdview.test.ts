@@ -343,6 +343,28 @@ describe('pictures', () => {
     await pane.unmount()
   })
 
+  test('in Warp the pane hands the file to Warp\'s own viewer, and a half-block picture to the default app', async ($, on) => {
+    const w = world({ '/w/a.md': '# A\n\n![shot](s.png)', '/w/s.png': { bytes: PNG_640x480 } }, { TERM_PROGRAM: 'WarpTerminal' })
+    await start($, on, w)
+    await $.command.run({ command: 'md', args: 'a.md' } as never)
+    const pane = await $.ui.mount(PANE)
+    await pane.press({ key: 'warp' })
+    expect(w.runs.at(-1)).toEqual(['open', '-a', 'Warp', '/w/a.md'])
+    const original = await pane.find({ type: 'Button', text: '↗ original' })
+    await pane.press({ key: String(original?.key) })
+    expect(w.runs.at(-1)).toEqual(['open', '/w/s.png'])
+    await pane.unmount()
+  })
+
+  test('outside Warp there is no Warp button', async ($, on) => {
+    const w = world({ '/w/a.md': '# A' }, { TERM_PROGRAM: 'iTerm.app' })
+    await start($, on, w)
+    await $.command.run({ command: 'md', args: 'a.md' } as never)
+    const pane = await $.ui.mount(PANE)
+    expect(await pane.find({ key: 'warp' })).toBeUndefined()
+    await pane.unmount()
+  })
+
   test('iTerm2 is no kitty-protocol terminal: its pictures are half blocks too', async ($, on) => {
     const w = world({ '/w/a.md': '![shot](s.png)', '/w/s.png': { bytes: PNG_640x480 } }, { TERM_PROGRAM: 'iTerm.app', TERM: 'xterm-256color' })
     await start($, on, w)
