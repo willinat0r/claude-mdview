@@ -2,101 +2,165 @@
 
 # mdview
 
-**在 Claude Code 里直接读 Claude 提到的 markdown 文件。**<br>
-单击对话里的 `.md` 路径，文件就在侧边 pane 里渲染出来：标题、表格、代码、可以继续点的链接，还有图片。
+**Markdown,就在你正看着的地方渲染出来。**<br>
+单击 Claude 提到的 `.md` 路径，文件就在对话旁边展开：标题、表格、代码、图片一应俱全。想改哪一块，指着它告诉 Claude 就行。
 
 [![Version](https://img.shields.io/badge/version-0.1.0-d77757.svg)](https://github.com/xuanji86/claude-mdview/releases)
 [![Claude Code mod](https://img.shields.io/badge/Claude%20Code-mod-c678dd.svg)](https://code.claude.com/docs/en/plugins/mods/overview)
+[![Terminals](https://img.shields.io/badge/Ghostty%20·%20iTerm2%20·%20Warp-4a4a4a.svg)](#终端)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4eba65.svg)](LICENSE)
 
 [English](README.md) · **中文**
+
+<img src="assets/pane.svg" alt="在 Claude Code 对话旁边的 pane 里渲染出来的 markdown 文件" width="820">
 
 </div>
 
 ## 为什么
 
-Claude 常把计划、报告、笔记写成 markdown 文件，并在回复里给出路径。要读它就得离开会话，去编辑器或浏览器。**mdview** 是一个
-[mod](https://code.claude.com/docs/en/plugins/mods/overview):把这些路径变成可点的链接，在对话旁边的 pane 里用 Claude Code
-自带的 markdown 渲染器显示文件。
+Claude 常把计划、报告、笔记写成 markdown 文件，再把路径告诉你。以前要读它，得离开会话去开编辑器或浏览器;要改它，得对着一个看不见的文件描述"第几段那句话"。
 
-## 功能
+**mdview** 是一个 [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview),把这件事闭环了：路径变成链接，单击就在对话旁边的 pane 里打开文件，用的是 Claude Code 自己的 markdown 渲染器，读起来和它的回复一样顺眼。哪里要改，指着那一块说一句，Claude 动手改，pane 当场刷新。
+
+## 亮点
 
 | | |
 | --- | --- |
-| **可点的路径** | 回复里指向已存在文件的 `.md` 路径(反引号里的、裸写的、markdown 链接、和中文紧贴的都算)后面会带 `↗`,单击打开 pane;`path:12` 和 `path#标题` 会跳到对应位置。读写 markdown 文件的 Read/Write/Edit 工具行、以及你自己提到 markdown 文件的消息，下面会多一行 `⎿ 路径↗` |
-| **pane** | 停靠在对话旁边，尽量占满终端宽度;Esc 关闭 |
-| **跳转** | 文档里的链接直接在 pane 里打开(其他文件、`#锚点`、`:行号`);`← Back`(`b`)返回 |
-| **目录和查找** | `Contents`(`t`)列出标题，点了就跳;`Find`(`f`)在包含该文字的小节之间跳 |
-| **长文件** | 分页显示(`p` / `n`);被切开的长代码块会重新补上反引号，长表格会重复表头 |
-| **图片** | 单独占一行的图片直接画出来(见[终端](#终端));夹在文字中间的变成 `🖼` 链接 |
-| **HTML 和宽表格** | 常见 HTML(`<details>`、`<br>`、`<img>`、`<a>`、`<b>`、注释)转成 markdown;放不下的宽表格改成按行显示 |
-| **编辑** | 鼠标移到某一块(段落、列表、表格、代码、图片、标题)上，它右端会出现 `✎`;点它打开输入条，写下要怎么改，回车后作为你的消息发给 Claude(带上文件、这一块的行号和开头几个字),Claude 改完 pane 自动刷新 |
-| **其他文件** | 任何文本文件都按代码高亮显示，带行号 |
-| **自动刷新** | Claude 写或改的文件立即刷新;外部修改最多 1.5 秒后刷新 |
-| **`/md`** | `/md <路径>[#标题\|:行号]` 打开任意文件;不带参数则重新打开上一个;`/md mode` 切换单击打开方式 |
-| **工具** | `mcp__mdview__show`:你让 Claude 打开某个文件时，它会在 pane 里打开(在 Warp 里用 Warp 查看器),不会交给外部程序 |
-| **Warp** | 默认单击路径会在右侧分栏打开 Warp 自带的 Markdown 查看器(取决于 Warp 的“打开文件布局”设置):图片清晰、mermaid 能画、还能编辑;也可以改成 pane 或默认程序，见[设置](#设置)。在 pane 里点 `Warp ↗`(`w`)效果一样 |
+| **一键就读** | 指向真实文件的 `.md` 路径后面会带上 `↗`,反引号里的、裸写的、markdown 链接、和中文紧贴的都认得。回复里有，`Read` / `Write` / `Edit` 工具行下面和你自己的消息下面也有。`路径:42` 和 `路径#标题` 直接跳到那里 |
+| **是阅读器，不是一堆字** | 按标题分节，有目录(`t`)、查找(`f`),长文件分成几部分(`p` `n`),文档之间的链接在 pane 里接着打开，还能返回(`b`) |
+| **终端里看图** | 在 Ghostty、kitty、iTerm2 3.7+ 里是终端自己画的清晰原图，其他终端是彩色半格色块。PNG、JPEG、GIF、HEIC 都行 |
+| **指哪改哪** | 鼠标停在某一块上，它会高亮，并出现 `✎`。写下要怎么改，回车;Claude 会收到文件、行号和这一块的开头 |
+| **实时刷新** | Claude 写的文件立即刷新;外部修改最多 1.5 秒 |
+| **每个终端用顺手的查看器** | 单击可以开 mdview 的 pane、Warp 自带的 Markdown 查看器(在会话旁边分栏),或者 macOS 给 `.md` 设定的默认程序。用 `/md mode` 切换 |
+| **不止 markdown** | 任何文本文件都按代码高亮显示，带行号。常见 HTML 和放不下的宽表格会转成终端能显示的样子 |
+| **Claude 也能主动给你看** | 你让它打开某个文件，它会用 `mcp__mdview__show` 在 pane 里打开(在 Warp 里用 Warp 查看器) |
+
+## 看它怎么用
+
+<table>
+<tr>
+<td width="62%" valign="top">
+
+**指着一块，说出要改什么**
+
+<img src="assets/edit.svg" alt="悬停高亮的一块和它的输入条，以及发给 Claude 的消息" width="100%">
+
+</td>
+<td width="38%" valign="top">
+
+**悬停**在段落、列表、表格、代码块或图片上，它会高亮，右端出现 `✎`。
+
+**点 `✎`** 写下修改，比如"改成清单"。**回车**后它作为你的消息发出，带上文件、行号和这一块的开头。
+
+**Claude 动手改**,pane 原地刷新。输入条开着时文件变了，它会跟着那一块走;那一块被删了，输入条就关掉。
+
+</td>
+</tr>
+</table>
 
 ## 安装
 
-需要 Claude Code **2.1.287 或更新**(mod 接口是抢先体验版;在 2.1.288 上测试),并使用 **fullscreen** 界面
-(`~/.claude/settings.json` 里 `"tui": "fullscreen"`):只有这个模式下，单击事件才会传给 mod。
+需要 **Claude Code 2.1.287 或更新**(mod 从这个版本开始提供;在 2.1.288 上测试),并使用 **fullscreen** 界面(`/tui fullscreen`)，只有这个模式下单击才会传给 mod。mod 接口还是抢先体验版，Claude Code 升级后可能变化。
 
-```bash
+```text
+/plugin marketplace add xuanji86/claude-mdview
+/plugin install mdview@claude-mdview
+```
+
+<details>
+<summary>也可以从源码加载</summary>
+
+```sh
 git clone https://github.com/xuanji86/claude-mdview ~/Desktop/claude-mdview
 ```
 
-然后在 `~/.claude/settings.json` 里让每个会话都加载它(多个路径用 `:` 分隔):
+然后加进 `~/.claude/settings.json`(多个目录用 `:` 分隔):
 
 ```json
 { "env": { "CLAUDE_CODE_PLUGIN_DIRS": "~/Desktop/claude-mdview" } }
 ```
 
-或者只对一个会话：`claude --plugin-dir ~/Desktop/claude-mdview`。
+或者只对一个会话加载：`claude --plugin-dir ~/Desktop/claude-mdview`。
+
+</details>
+
+## 用法
+
+| | |
+| --- | --- |
+| **单击** `↗` 路径 | 按你的设置打开(见[设置](#设置)) |
+| `/md <路径>[#标题\|:行号]` | 在 pane 里打开任意文件;只打 `/md` 重新打开上一个 |
+| `/md mode [选项]` | 切换当前终端里单击打开什么;不带选项就切到下一个 |
+| **Esc** · `q` | 关闭 pane |
+| `b` | 回到上一个文档 |
+| `t` · `f` | 目录 · 查找(再按回车跳到下一个) |
+| `p` · `n` | 长文件的上一部分 · 下一部分 |
+| `w` | 在 Warp 里：用 Warp 自带的查看器打开这个文件 |
+| **悬停** → `✎` | 让 Claude 改这一块 |
+
+这些按键在 pane 拿着键盘时有效：输入框为空时打开 pane,它会自动拿到键盘;点一下 pane 也能把键盘交给它。
 
 ## 设置
 
-单击对话中的路径时打开什么，可以在 `/config` 里设(**Click opens** 和 **Click opens (Warp)** 两项),也可以用 `/md mode`
-切换当前终端对应的那一项(只打 `/md mode` 就切到下一个选项):
+在 `/config` 里的 **Click opens** 和 **Click opens (Warp)** 两项;`/md mode` 改的也是这两项。
 
-| 设置 | 选项 |
-| --- | --- |
-| `clickOpens`(Warp 以外) | `pane`(默认):mdview 的 pane · `app`:macOS 为 `.md` 设定的默认程序 |
-| `clickOpensInWarp` | `warp`(默认):Warp 自带的 Markdown 查看器，在右侧分栏 · `pane` · `app` |
+| 设置 | 选项 | 默认 |
+| --- | --- | --- |
+| `clickOpens` | `pane`:mdview 的 pane · `app`:macOS 为 `.md` 设定的默认程序 | `pane` |
+| `clickOpensInWarp` | `warp`:Warp 自带的 Markdown 查看器，在右侧分栏 · `pane` · `app` | `warp` |
 
-默认程序或 Warp 打不开时，会改为打开 pane。要换默认程序，在 Finder 里：显示简介 › 打开方式 › 全部更改。默认程序总是从文件开头打开;
-`:行号` 只在 Warp 查看器和 pane 里有效。
+默认程序或 Warp 打不开时，会改为打开 pane。默认程序总是从文件开头打开;`:行号` 只在 Warp 查看器和 pane 里有效。要换默认程序，在 Finder 里：显示简介 › 打开方式 › 全部更改。
 
 ## 终端
 
-| 终端 | 图片 |
+| 终端 | 图片 | 默认单击打开 |
+| --- | --- | --- |
+| **Ghostty**、**kitty** | 清晰：终端自己画的原图 | mdview 的 pane |
+| **iTerm2 3.7+** | 只对 iTerm2 设 `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` 后清晰(见下);不设则是半格色块 | mdview 的 pane |
+| **Warp** | pane 里是半格色块;Warp 自带查看器里清晰 | Warp 查看器，右侧分栏 |
+| 其他 | 彩色半格色块(`▀`,每格两个像素) | mdview 的 pane |
+
+Claude Code 只在它信得过的终端里画图:kitty 和 Ghostty。iTerm2 3.7 支持同一套 kitty 图片协议，包括 Unicode 占位符，所以可以强制开启。只对 iTerm2 生效的写法，放进 `~/.zshrc`:
+
+```sh
+[[ $TERM_PROGRAM == iTerm.app ]] && export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1
+```
+
+别对 Warp 开：Warp 还不支持 Unicode 占位符([warpdotdev/Warp#6210](https://github.com/warpdotdev/Warp/issues/6210)),强制开启会把界面搞乱。非 PNG 格式的图片、以及所有半格色块图，都要经过 macOS 自带的 `sips`;没有它就只显示 alt 文字。
+
+## 它能碰到什么
+
+mdview 只读、只画，只在你要求时动手。`claude plugin validate .` 会列出它用到的每一个钩子和调用。
+
+| 它会 | 什么时候 |
 | --- | --- |
-| Ghostty、kitty | 终端自己画的真图(kitty 图片协议) |
-| iTerm2 3.7+ | 同上，但要只对 iTerm2 设 `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1`,比如在 `~/.zshrc` 里加：`[[ $TERM_PROGRAM == iTerm.app ]] && export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` |
-| Warp 及其他 | 彩色半格色块(`▀`,每格两个像素):认得出，但不清晰;色块下面的 `↗ original` 用默认程序打开原图。在 Warp 里单击直接交给 Warp 自带的查看器 |
+| 读文件 | 文件路径出现在对话里(确认文件存在)，或者你打开它 |
+| 运行 `sips` | 画非 PNG 图片，或任何半格色块图时：转换到 `$TMPDIR` 下的文件(半格色块用的读完即删) |
+| 运行 `open` | 你在 `app` 或 `warp` 模式下单击时，且只对 markdown 文件。Claude 的 show 工具从不调用它，所以没法借它运行脚本或启动程序 |
+| 发送消息 | 你在 `✎` 输入条里按回车时，只发你写的那句话 |
+| 改设置 | 你运行 `/md mode` 时 |
 
-Claude Code 默认只在 kitty 和 Ghostty 里画图。iTerm2 3.7 支持 kitty 图片协议和它的 Unicode 占位符，所以强制开启可以用;Warp
-还不支持占位符([warpdotdev/Warp#6210](https://github.com/warpdotdev/Warp/issues/6210)),强制开启会把界面搞乱。
-
-非 PNG 格式的图片、以及所有用色块画的图片，都要经过 macOS 自带的 `sips` 处理;其他系统上只显示 alt 文字。
+它不发任何网络请求，不跨会话保存任何东西，也不自己调用模型。
 
 ## 限制
 
-- 做不到真全屏:mod 的 pane 只能停靠在对话旁边，对话区有最小宽度。
-- 数学公式、mermaid、标题字号超出了终端文字渲染器的能力，按原文显示。
-- 被 mdview 重画的回复(含可点路径的那些)复制时会带上 `⏺`。
-- 单个 Markdown 元素最多 1 万字符，整个画面约 10 万字符，所以长文件要分页。
-- mod 接口还是抢先体验版，Claude Code 升级后可能变化。
+- **做不到真全屏。** mod 的 pane 只能停靠在对话旁边，对话区有最小宽度;剩下的宽度 mdview 全要了。
+- **单击要 fullscreen 界面。** 普通界面下用 `/md`。
+- **终端只会画文字。** 数学公式、mermaid、标题字号按原文显示。Warp 自带的查看器能画 mermaid。
+- **重画的回复。** 含可点路径的回复是 mdview 重画的，复制时会带上 `⏺`。
+- **长度。** 单个 markdown 元素最多 1 万字符，整个 pane 约 10 万，所以长文件要分几部分。
+- **抢先体验。** mod 接口可能随 Claude Code 版本变化。
 
 ## 开发
 
-```bash
+```sh
 claude plugin validate .
-claude plugin test .
+claude plugin test .            # 35 个测试
+python3 assets/make_previews.py # 生成 README 里的图
 ```
 
 保存文件后，所有从这个目录加载它的会话都会自动重新加载。
 
 ## 许可证
 
-[MIT](LICENSE)
+[MIT](LICENSE) © Anji Xu

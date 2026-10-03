@@ -2,104 +2,181 @@
 
 # mdview
 
-**Read the markdown files Claude names, without leaving Claude Code.**<br>
-Click a `.md` path in the conversation and the file opens rendered in a side pane: headings, tables, code, links you can follow, pictures included.
+**Markdown, rendered right where you are already looking.**<br>
+Click a `.md` path Claude mentions and read the file beside the conversation, with headings, tables, code and
+pictures. Then point at any block and tell Claude what to change.
 
 [![Version](https://img.shields.io/badge/version-0.1.0-d77757.svg)](https://github.com/xuanji86/claude-mdview/releases)
 [![Claude Code mod](https://img.shields.io/badge/Claude%20Code-mod-c678dd.svg)](https://code.claude.com/docs/en/plugins/mods/overview)
+[![Terminals](https://img.shields.io/badge/Ghostty%20·%20iTerm2%20·%20Warp-4a4a4a.svg)](#terminals)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4eba65.svg)](LICENSE)
 
 **English** · [中文](README.zh-CN.md)
+
+<img src="assets/pane.svg" alt="A markdown file rendered in a pane beside the Claude Code conversation" width="820">
 
 </div>
 
 ## Why
 
-Claude writes plans, reports and notes as markdown files and names them in its replies. Reading one means leaving the
-session for an editor or a browser. **mdview** is a [mod](https://code.claude.com/docs/en/plugins/mods/overview) that
-makes those paths clickable and shows the file in a pane beside the conversation, drawn by Claude Code's own markdown
-renderer.
+Claude writes its plans, reports and notes as markdown files and gives you the path. Reading one used to mean leaving
+the session for an editor or a browser, and editing it meant describing a spot in a file you could not see.
 
-## Features
+**mdview** is a [Claude Code mod](https://code.claude.com/docs/en/plugins/mods/overview) that closes that loop. Paths
+become links. A click opens the file in a pane beside the conversation, drawn by Claude Code's own markdown renderer, so
+a plan reads like the reply it came from. When something needs to change, you point at the block and say so. Claude
+makes the edit, and the pane redraws as it lands.
+
+## Highlights
 
 | | |
 | --- | --- |
-| **Clickable paths** | A `.md` path in a reply (in backticks, bare, as a markdown link, even run into Chinese text) that names an existing file gets a `↗` and opens the pane on a plain click; `path:12` and `path#heading` land there. Read/Write/Edit rows and your own prompts that name a markdown file get an `⎿ path↗` line under them |
-| **The pane** | Docked beside the transcript, as wide as the terminal allows; Esc closes it |
-| **Navigation** | Links inside the file follow in place (other files, `#anchors`, `:line`); `← Back` (`b`) returns |
-| **Contents and find** | `Contents` (`t`) lists the headings to jump to; `Find` (`f`) jumps from section to section holding the text |
-| **Long files** | Paged in parts (`p` / `n`); long code blocks are closed and reopened, long tables repeat their header |
-| **Pictures** | A picture on a line of its own is drawn in place (see [Terminals](#terminals)); one inside text becomes a `🖼` link |
-| **HTML and wide tables** | Common HTML (`<details>`, `<br>`, `<img>`, `<a>`, `<b>`, comments) becomes markdown; a table too wide for the pane becomes one record per row |
-| **Editing** | Hover a block (paragraph, list, table, code, picture, heading) and a `✎` shows at its right end; it opens a bar: type what to change and Enter sends it to Claude as your prompt, naming the file, the block's lines and how they begin; Claude edits, the pane redraws |
-| **Other files** | Any text file opens as highlighted code with line numbers |
-| **Live** | A file Claude writes or edits redraws at once; one changed elsewhere within 1.5 s |
-| **`/md`** | `/md <path>[#heading\|:line]` opens any file; `/md` alone reopens the last one; `/md mode` switches what a click opens |
-| **Tool** | `mcp__mdview__show` lets Claude open a file in the pane (in Warp, Warp's viewer) when you ask it to; it never hands a file to an app |
-| **Warp** | By default a click on a path opens Warp's own Markdown viewer split to the right (Warp's "open file layout" setting): sharp pictures, mermaid, editing; see [Configure](#configure) for the pane or the app. In the pane, `Warp ↗` (`w`) does the same |
+| **One click to read** | A `.md` path that names a real file gets a `↗`, whether it is in backticks, bare, a markdown link or run into Chinese text. Links appear in replies, under `Read` / `Write` / `Edit` rows and under your own prompts. `path:42` and `path#heading` land on the spot |
+| **A reader, not a dump** | Sections with a Contents list (`t`), Find (`f`), long files in parts (`p` `n`), links between files followed in place, and Back (`b`) |
+| **Pictures in the terminal** | The terminal's own sharp picture in Ghostty, kitty and iTerm2 3.7+, and colored half blocks anywhere else. PNG, JPEG, GIF and HEIC all work |
+| **Point, then edit** | Hover a block and it lights up with a `✎`. Say what to change and press Enter; Claude gets the file, the lines and how they begin |
+| **Live** | A file Claude writes redraws at once; one changed elsewhere within 1.5 s |
+| **Your viewer, per terminal** | A click opens mdview's pane, Warp's own Markdown viewer split beside the session, or the app macOS opens `.md` with. `/md mode` switches |
+| **More than markdown** | Any text file opens as highlighted code with line numbers. Common HTML and too-wide tables are turned into something a terminal can show |
+| **Claude can show you** | Ask to see a file and Claude opens it with `mcp__mdview__show`: in the pane, or in Warp's viewer in Warp |
+
+## See it work
+
+<table>
+<tr>
+<td width="62%" valign="top">
+
+**Point at a block, say the change**
+
+<img src="assets/edit.svg" alt="A hovered block with its edit bar, and the prompt it sent to Claude" width="100%">
+
+</td>
+<td width="38%" valign="top">
+
+**Hover** a paragraph, list, table, code block or picture. It lights up, and a `✎` shows at its right end.
+
+**Click `✎`** and type the change, such as *make it a checklist*. **Enter** sends it as your prompt, naming the file,
+the lines and how they begin.
+
+**Claude edits**, and the pane redraws in place. If the file shifts under an open bar, the bar follows its block; if
+the block is gone, the bar closes.
+
+</td>
+</tr>
+</table>
 
 ## Install
 
-Requires Claude Code **2.1.287 or later** (mods are early access; tested on 2.1.288) in the **fullscreen** layout
-(`"tui": "fullscreen"` in `~/.claude/settings.json`): only there does a click reach a mod.
+Needs **Claude Code 2.1.287 or later** (the release that brought mods; tested on 2.1.288), in the **fullscreen** layout
+(`/tui fullscreen`), the only layout where a click reaches a mod. Mods are early access, and their API may change
+between releases.
 
-```bash
+```text
+/plugin marketplace add xuanji86/claude-mdview
+/plugin install mdview@claude-mdview
+```
+
+<details>
+<summary>From a clone instead</summary>
+
+```sh
 git clone https://github.com/xuanji86/claude-mdview ~/Desktop/claude-mdview
 ```
 
-Then load it in every session through `~/.claude/settings.json` (paths separated by `:`):
+Then add it to `~/.claude/settings.json` (several folders separate with `:`):
 
 ```json
 { "env": { "CLAUDE_CODE_PLUGIN_DIRS": "~/Desktop/claude-mdview" } }
 ```
 
-or for one session: `claude --plugin-dir ~/Desktop/claude-mdview`.
+Or load it for one session only: `claude --plugin-dir ~/Desktop/claude-mdview`.
+
+</details>
+
+## Use
+
+| | |
+| --- | --- |
+| **Click** a `↗` path | Opens it, where your setting says (see [Configure](#configure)) |
+| `/md <path>[#heading\|:line]` | Opens any file in the pane; `/md` alone reopens the last one |
+| `/md mode [choice]` | Switches what a click opens in this terminal; alone, moves to the next choice |
+| **Esc** · `q` | Closes the pane |
+| `b` | Back to the file you came from |
+| `t` · `f` | Contents · Find (Enter again for the next match) |
+| `p` · `n` | Previous · next part of a long file |
+| `w` | In Warp: this file in Warp's own viewer |
+| **Hover** → `✎` | Edit that block with Claude |
+
+The keys work while the pane holds the keyboard, which it takes when it opens over an empty prompt. A click on the
+pane gives the keyboard back to it.
 
 ## Configure
 
-What a click on a path in the conversation opens, set in `/config` (rows **Click opens** and **Click opens (Warp)**)
-or with `/md mode`, which switches this terminal's row (`/md mode` alone moves to the next choice):
+In `/config`, the rows **Click opens** and **Click opens (Warp)**. `/md mode` sets the same values.
 
-| Setting | Choices |
-| --- | --- |
-| `clickOpens` (outside Warp) | `pane` (default): mdview's pane · `app`: the app macOS opens `.md` files with |
-| `clickOpensInWarp` | `warp` (default): Warp's own Markdown viewer, split to the right · `pane` · `app` |
+| Setting | Choices | Default |
+| --- | --- | --- |
+| `clickOpens` | `pane`: mdview's pane · `app`: the app macOS opens `.md` files with | `pane` |
+| `clickOpensInWarp` | `warp`: Warp's Markdown viewer, split to the right · `pane` · `app` | `warp` |
 
-When the app or Warp cannot open a file, the click opens the pane instead. To change the app, in Finder: Get Info ›
-Open with › Change All. The app opens the file at its top: a `:line` goes to Warp's viewer and the pane only.
+If the app or Warp cannot open a file, the click falls back to the pane. The app always opens at the top of the file;
+`:line` works in Warp's viewer and in the pane. To change the app, use Finder: Get Info › Open with › Change All.
 
 ## Terminals
 
-| Terminal | Pictures |
+| Terminal | Pictures | A click opens, by default |
+| --- | --- | --- |
+| **Ghostty**, **kitty** | Sharp: the terminal's own picture | mdview's pane |
+| **iTerm2 3.7+** | Sharp, with `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` set for iTerm2 only (see below). Without it, half blocks | mdview's pane |
+| **Warp** | Half blocks in the pane; sharp in Warp's own viewer | Warp's viewer, split to the right |
+| Others | Colored half blocks (`▀`, two pixels a cell) | mdview's pane |
+
+Claude Code draws pictures only in terminals it trusts to place them: kitty and Ghostty. iTerm2 3.7 supports the same
+kitty graphics protocol, Unicode placeholders included, so it can be switched on there. Put it in `~/.zshrc` for iTerm2
+alone:
+
+```sh
+[[ $TERM_PROGRAM == iTerm.app ]] && export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1
+```
+
+Do not set it for Warp: Warp has no Unicode placeholders yet
+([warpdotdev/Warp#6210](https://github.com/warpdotdev/Warp/issues/6210)), and forcing pictures garbles the screen.
+Formats other than PNG, and every half-block picture, go through macOS's `sips`; without it you see their alt text.
+
+## What it can reach
+
+mdview reads, draws, and acts only when you ask it to. `claude plugin validate .` prints every hook and call it makes.
+
+| It | When |
 | --- | --- |
-| Ghostty, kitty | The terminal's own picture (kitty graphics protocol) |
-| iTerm2 3.7+ | The same, with `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` set for iTerm2 only, e.g. in `~/.zshrc`: `[[ $TERM_PROGRAM == iTerm.app ]] && export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` |
-| Warp, others | Colored half blocks (`▀`, two pixels a cell): recognizable, not sharp; `↗ original` under one opens the file in its default app. In Warp a click goes to Warp's own viewer instead |
+| reads a file | its path is in the conversation (to see that it exists), or you open it |
+| runs `sips` | it draws a picture other than a PNG, or any picture as half blocks: into a file under `$TMPDIR` (a half-block one is removed once read) |
+| runs `open` | you click with `app` or `warp` chosen, for markdown files only. The model's show tool never uses it, so it cannot launch a script or an app |
+| sends a prompt | you press Enter in a `✎` bar, and only with the text you typed |
+| changes a setting | you run `/md mode` |
 
-Claude Code draws pictures only in kitty and Ghostty unless forced. iTerm2 3.7 has the kitty graphics protocol and its
-Unicode placeholders, so forcing works there; Warp has no placeholders yet
-([warpdotdev/Warp#6210](https://github.com/warpdotdev/Warp/issues/6210)), and forcing it garbles the screen.
-
-Formats other than PNG, and every picture drawn as half blocks, go through macOS's `sips`; elsewhere those show their
-alt text.
+It makes no network requests, stores nothing across sessions, and calls no model of its own.
 
 ## Limits
 
-- No true fullscreen view: a mod's pane docks beside the transcript, which keeps a minimum width.
-- Math, mermaid and heading sizes are beyond a terminal's text renderer; they show as written.
-- A reply mdview redraws (one with a clickable path) copies its `⏺` along with the text.
-- One Markdown element holds at most 10,000 characters and a drawing about 100,000, hence the paging.
-- The mods API is early access and may change between Claude Code releases.
+- **No true fullscreen.** A mod's pane docks beside the transcript, which keeps a minimum width; mdview asks for all the
+  rest.
+- **Clicks need the fullscreen layout.** On the main screen, use `/md`.
+- **A terminal draws text.** Math, mermaid and heading sizes show as written. Warp's own viewer does draw mermaid.
+- **Redrawn replies.** A reply with a clickable path is drawn by mdview, so copying it brings its `⏺` along.
+- **Size.** One markdown element holds at most 10,000 characters and a pane about 100,000, so long files come in parts.
+- **Early access.** The mods API may change between Claude Code releases.
 
 ## Develop
 
-```bash
+```sh
 claude plugin validate .
-claude plugin test .
+claude plugin test .            # 35 tests
+python3 assets/make_previews.py # the README pictures
 ```
 
-Saving a file reloads the mod in every session that loads it from this folder.
+A saved file reloads the mod in every session that loads it from this folder.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) © Anji Xu
