@@ -54,6 +54,17 @@ git clone https://github.com/xuanji86/claude-mdview ~/Desktop/claude-mdview
 
 或者只对一个会话：`claude --plugin-dir ~/Desktop/claude-mdview`。
 
+## 设置
+
+在 `/config` 里的 **mdview › Click opens** 选择单击对话中的路径时打开什么：
+
+| | |
+| --- | --- |
+| `pane`(默认) | mdview 的 pane;在 Warp 里是 Warp 自带的 Markdown 查看器 |
+| `app` | macOS 为 `.md` 设定的默认程序(在 Finder 里：显示简介 › 打开方式 › 全部更改) |
+
+也可以写进 `~/.claude/settings.json`:`"pluginConfigs": { "mdview": { "options": { "clickOpens": "app" } } }`。
+
 ## 终端
 
 | 终端 | 图片 |

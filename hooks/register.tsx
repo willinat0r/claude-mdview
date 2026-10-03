@@ -46,6 +46,7 @@ const views = new Map<string, View>() // lazy: the last 8 files drawn, by path, 
 const sizes = new Map<string, { width: number; height: number } | null>() // lazy: a picture's size, never re-read
 let pictures = false // the terminal draws an Image itself (kitty's graphics protocol); elsewhere pictures are Rasters
 let isWarp = false // Warp has a Markdown viewer of its own, a click away from the pane
+let clickOpens: 'pane' | 'app' = 'pane' // userConfig: what a click on a path in the conversation opens
 let tmp = '/tmp'
 let made = 0
 
@@ -325,10 +326,12 @@ const warpUrl = (ref: Ref): string => {
   return `warp://action/open_file_editor?path=${encodeURIComponent(ref.abs)}${line ? `&line=${line}` : ''}`
 }
 
-// A click on a path in the conversation: in Warp, Warp's own viewer beside it; elsewhere the pane.
+// A click on a path in the conversation: with `clickOpens: app`, the app macOS opens it with; else in Warp, Warp's own
+// viewer beside it, and elsewhere the pane.
 function pressFromTranscript($: EngineInterface, href: string): Promise<unknown> {
-  if (!isWarp) return press($, href)
   const ref = refOf(href)
+  if (clickOpens === 'app') return ref ? openWith($, [ref.abs]) : Promise.resolve()
+  if (!isWarp) return press($, href)
   return ref ? openWith($, [warpUrl(ref)]) : Promise.resolve()
 }
 
@@ -376,7 +379,8 @@ async function findNext($: EngineInterface, query: string) {
   if (hit !== undefined) await goUnit($, hit)
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  clickOpens = options.clickOpens === 'app' ? 'app' : 'pane'
   on('session.start', async ($, e, next) => {
     await homeDir($)
     remember(e.cwd)

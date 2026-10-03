@@ -9,6 +9,24 @@
   "homepage": "https://github.com/xuanji86/claude-mdview",
   "repository": "https://github.com/xuanji86/claude-mdview",
   "license": "MIT",
-  "keywords": ["markdown", "viewer", "pane", "mod", "ui"],
-  "types": "./types/index.d.ts"
+  "keywords": [
+    "markdown",
+    "viewer",
+    "pane",
+    "mod",
+    "ui"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "clickOpens": {
+      "title": "Click opens",
+      "description": "What a click on a .md path in the conversation opens: pane = mdview's side pane (in Warp, Warp's own Markdown viewer); app = the app macOS opens .md files with",
+      "type": "string",
+      "options": [
+        "pane",
+        "app"
+      ],
+      "default": "pane"
+    }
+  }
 }

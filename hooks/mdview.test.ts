@@ -381,6 +381,16 @@ describe('pictures', () => {
     expect(w.runs.at(-1)).toEqual(['open', 'warp://action/open_file_editor?path=%2Fw%2FREADME.md'])
   })
 
+  test('with clickOpens: app, a click on a path hands the file to the app macOS opens it with, in any terminal', { options: { clickOpens: 'app' } }, async ($, on) => {
+    const w = world({ '/w/README.md': '# R' }, { TERM_PROGRAM: 'WarpTerminal' })
+    await start($, on, w)
+    const ui = await $.ui.mount(reply('See `README.md:3`.'))
+    await ui.press({ key: 'r0', link: { href: 'file:///w/README.md#L3' } })
+    expect(w.runs.at(-1)).toEqual(['open', '/w/README.md'])
+    expect(w.opened).toEqual([]) // no pane
+    await ui.unmount()
+  })
+
   test('outside Warp there is no Warp button', async ($, on) => {
     const w = world({ '/w/a.md': '# A' }, { TERM_PROGRAM: 'iTerm.app' })
     await start($, on, w)

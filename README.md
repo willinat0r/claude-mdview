@@ -55,6 +55,17 @@ Then load it in every session through `~/.claude/settings.json` (paths separated
 
 or for one session: `claude --plugin-dir ~/Desktop/claude-mdview`.
 
+## Configure
+
+In `/config`, **mdview › Click opens** picks what a click on a path in the conversation opens:
+
+| | |
+| --- | --- |
+| `pane` (default) | mdview's pane; in Warp, Warp's own Markdown viewer |
+| `app` | The app macOS opens `.md` files with (set it in Finder: Get Info › Open with › Change All) |
+
+Or in `~/.claude/settings.json`: `"pluginConfigs": { "mdview": { "options": { "clickOpens": "app" } } }`.
+
 ## Terminals
 
 | Terminal | Pictures |
