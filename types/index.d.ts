@@ -9,10 +9,14 @@ export type MdviewFind = { query: string; at: number; hits: number }
 // changes above it): its edit bar is open.
 export type MdviewEdit = { path: string; line: number; hash: string }
 
+// An edit sent to Claude from a block's ✎: the block, the file's mtime when sent, and whether Claude's turn has ended;
+// the pane shows its progress under the block until a few seconds after.
+export type MdviewPending = { path: string; line: number; hash: string; mtime: number; finished: boolean }
+
 declare module 'claude-code' {
   // `edit` is Shaped: its atom names a shape, bumped whenever MdviewEdit changes, so a reload declines an old value
   interface PluginState {
     // `cwds`: the working directories the session has had, latest first, kept across reloads of the mod
-    mdview: { doc: MdviewDoc | null; rev: number; toc: boolean; find: MdviewFind | null; edit: Shaped<MdviewEdit | null>; cwds: string[] }
+    mdview: { doc: MdviewDoc | null; rev: number; toc: boolean; find: MdviewFind | null; edit: Shaped<MdviewEdit | null>; cwds: string[]; pending: MdviewPending | null }
   }
 }

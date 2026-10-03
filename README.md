@@ -58,8 +58,9 @@ makes the edit, and the pane redraws as it lands.
 **Click `✎`** and type the change, such as *make it a checklist*. **Enter** sends it as your prompt, naming the file,
 the lines and how they begin.
 
-**Claude edits**, and the pane redraws in place. If the file shifts under an open bar, the bar follows its block; if
-the block is gone, the bar closes.
+**Claude edits.** A line under the block follows it, as Claude Code hangs a result under its row: `⎿ ✶ Claude is
+editing…`, then `⎿ Updated`, and the pane redraws in place. If the file shifts under an open bar, the bar follows its
+block; if the block is gone, the bar closes.
 
 </td>
 </tr>
@@ -107,8 +108,8 @@ Or load it for one session only: `claude --plugin-dir ~/Desktop/claude-mdview`.
 | `w` | In Warp: this file in Warp's own viewer |
 | **Hover** → `✎` | Edit that block with Claude |
 
-The keys work while the pane holds the keyboard, which it takes when it opens over an empty prompt. A click on the
-pane gives the keyboard back to it.
+The pane lists its keys in one dim row under the file's name, each a click away too. They work while the pane holds the
+keyboard, which it takes when it opens over an empty prompt; a click on the pane gives the keyboard back to it.
 
 ## Configure
 
@@ -171,7 +172,7 @@ It makes no network requests, stores nothing across sessions, and calls no model
 
 ```sh
 claude plugin validate .
-claude plugin test .            # 35 tests
+claude plugin test .            # 36 tests
 python3 assets/make_previews.py # the README pictures
 ```
 

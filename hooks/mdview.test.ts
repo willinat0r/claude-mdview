@@ -71,6 +71,7 @@ const start = async ($: { session: { start: (e: never) => Promise<unknown> } }, 
   on('ui.invalidate', () => (w.invalidated++, { value: undefined }) as never)
   on('tool.call', () => ({ result: { type: 'create', filePath: '/w/new.md', content: '' } }) as never)
   on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('turn.complete', () => ({ text: '' }) as never)
   // the engine's own drawings
   on('ui.render', { component: 'AssistantMessage' }, () => ({ type: 'engine', ref: 0 }) as never)
   on('ui.render', { component: 'ToolUse' }, () => ({ type: 'engine', ref: 0 }) as never)
@@ -257,11 +258,14 @@ test('contents and find jump to sections; in Ghostty a PNG on its own line is th
   await $.command.run({ command: 'md', args: 'a.md' } as never)
   const pane = await $.ui.mount(PANE)
 
+  expect(await pane.find({ type: 'Text', text: 'a.md' })).toBeDefined() // the header names the file
+  expect(await pane.find({ type: 'Text', text: /· 13 lines · 3 sections$/ })).toBeDefined()
   const img = await pane.find({ type: 'Image' })
   expect(img?.props).toMatchObject({ source: { file: '/w/img/s.png', format: 'png' }, columns: 78, rows: 29, alt: 'shot' })
 
   await pane.press({ key: 'toc' })
   expect(await pane.find({ key: 'toc-2', type: 'Button' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '› ' })).toBeDefined() // the section in view is marked
   await pane.press({ key: 'toc-2' })
   expect(w.doc?.target).toBe('u2')
   expect(await pane.find({ key: 'toc-2' })).toBeUndefined() // contents fold after a jump
@@ -270,7 +274,7 @@ test('contents and find jump to sections; in Ghostty a PNG on its own line is th
   const field = pane as unknown as { input: (t: { key: string; text: string }) => Promise<unknown> }
   await field.input({ key: 'find', text: 'GAMMA' })
   expect(w.doc?.target).toBe('u1')
-  expect(await pane.find({ type: 'Text', text: '1 of 2 sections hold "GAMMA"' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '1/2' })).toBeDefined()
   await field.input({ key: 'find', text: 'GAMMA' })
   expect(w.doc?.target).toBe('u2')
   await pane.unmount()
@@ -282,9 +286,9 @@ test('a long file is paged; another file is shown as highlighted code from its l
   await start($, on, w)
   await $.command.run({ command: 'md', args: 'big.md' } as never)
   const pane = await $.ui.mount(PANE)
-  expect(await pane.find({ type: 'Text', text: 'Part 1 of 2' })).toBeDefined()
+  expect((await pane.find({ key: 'next-end' }))?.props.label).toBe('── part 1 of 2 · next part ↓ ──')
   expect(await pane.find({ key: 'u11' })).toBeUndefined()
-  await pane.press({ key: 'next-top' })
+  await pane.press({ key: 'next' })
   expect(await pane.find({ key: 'u11' })).toBeDefined()
   expect(await pane.find({ key: 'u0' })).toBeUndefined()
 
@@ -421,6 +425,26 @@ describe('editing', () => {
     await pane.unmount()
   })
 
+  test('an edit sent from ✎ shows under its block: Claude is editing, then Updated, or No changes made', async ($, on) => {
+    const w = world({ '/w/a.md': '# One\n\nalpha\n\nbeta' }, {})
+    await start($, on, w)
+    await $.command.run({ command: 'md', args: 'a.md' } as never)
+    let pane = await $.ui.mount(PANE)
+    await pane.press({ key: 'edit-0-1' })
+    await field(pane).input({ key: 'edit-input', text: 'shorter' })
+    expect(await pane.find({ type: 'Text', text: '✶ Claude is editing…' })).toBeDefined()
+    await pane.unmount()
+    w.files['/w/a.md'] = '# One\n\nalph\n\nbeta'
+    w.mtimes['/w/a.md'] = 2
+    pane = await $.ui.mount(PANE)
+    expect(await pane.find({ type: 'Text', text: 'Updated' })).toBeDefined()
+    await pane.press({ key: 'edit-0-2' })
+    await field(pane).input({ key: 'edit-input', text: 'longer' })
+    await $.turn.complete({ turnId: 't', reason: 'answer', answer: '', durationMs: 1, isAborted: false } as never)
+    expect(await pane.find({ type: 'Text', text: 'No changes made' })).toBeDefined()
+    await pane.unmount()
+  })
+
   test('the edit bar stays on its block when the file changes above it, and closes when the block is gone', async ($, on) => {
     const w = world({ '/w/a.md': '# One\n\nalpha\n\nbeta' }, {})
     await start($, on, w)
@@ -468,7 +492,7 @@ describe('click modes', () => {
     const pane = await $.ui.mount(PANE)
     await pane.press({ key: 'warp' })
     expect(w.runs.at(-1)).toEqual(['open', 'warp://action/open_file_editor?path=%2Fw%2Fa.md'])
-    const original = await pane.find({ type: 'Button', text: '↗ original' })
+    const original = await pane.find({ type: 'Button', text: '⎿  open the original' })
     await pane.press({ key: String(original?.key) })
     expect(w.runs.at(-1)).toEqual(['open', '/w/s.png'])
     await pane.unmount()

@@ -52,7 +52,7 @@ Claude 常把计划、报告、笔记写成 markdown 文件，再把路径告诉
 
 **点 `✎`** 写下修改，比如"改成清单"。**回车**后它作为你的消息发出，带上文件、行号和这一块的开头。
 
-**Claude 动手改**,pane 原地刷新。输入条开着时文件变了，它会跟着那一块走;那一块被删了，输入条就关掉。
+**Claude 动手改。** 这一块下面会挂一行进度，就像 Claude Code 在自己的条目下挂结果那样：先是 `⎿ ✶ Claude is editing…`,改完变成 `⎿ Updated`,pane 原地刷新。输入条开着时文件变了，它会跟着那一块走;那一块被删了，输入条就关掉。
 
 </td>
 </tr>
@@ -98,7 +98,7 @@ git clone https://github.com/xuanji86/claude-mdview ~/Desktop/claude-mdview
 | `w` | 在 Warp 里：用 Warp 自带的查看器打开这个文件 |
 | **悬停** → `✎` | 让 Claude 改这一块 |
 
-这些按键在 pane 拿着键盘时有效：输入框为空时打开 pane,它会自动拿到键盘;点一下 pane 也能把键盘交给它。
+pane 在文件名下面用一行暗色文字列出这些按键，每一个也都能直接点。按键在 pane 拿着键盘时有效：输入框为空时打开 pane,它会自动拿到键盘;点一下 pane 也能把键盘交给它。
 
 ## 设置
 
@@ -155,7 +155,7 @@ mdview 只读、只画，只在你要求时动手。`claude plugin validate .` �
 
 ```sh
 claude plugin validate .
-claude plugin test .            # 35 个测试
+claude plugin test .            # 36 个测试
 python3 assets/make_previews.py # 生成 README 里的图
 ```
 

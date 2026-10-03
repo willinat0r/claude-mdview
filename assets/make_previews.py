@@ -113,7 +113,8 @@ TRANSCRIPT = [
 SPLIT, COLS, ROWS = 46, 124, 25
 P = SPLIT + 2  # the pane's first text column
 DOC = [
-    [('[ ✕ ] [ ← Back ] [ Contents ] [ Find ]', 'fg', 'b'), ('  ~/app/docs/RELEASE.md', 'dim')],
+    [('⏺ ', 'fg'), ('RELEASE.md', 'fg', 'b'), ('  ~/app/docs · 31 lines · 3 sections', 'dim')],
+    [('b: back · t: contents · f: find · q: close', 'dim')],
     [],
     [('Release plan', 'fg', 'u')],
     [],
@@ -133,9 +134,9 @@ DOC = [
     [],
     [], [], [], [], [],
 ]
-under = [band(P - 1, COLS, 16, 17), picture(P, 18, 34, 5)]
+under = [band(P - 1, COLS, 17, 18), picture(P, 19, 34, 4)]
 pane_rows = [row for row in DOC]
-pane_rows[16] = DOC[16] + [(' ' * 8, 'fg'), ('✎', 'dim')]
+pane_rows[17] = DOC[17] + [(' ' * 8, 'fg'), ('✎', 'dim')]
 scene('pane.svg', TRANSCRIPT, pane_rows, SPLIT, COLS, ROWS, under)
 
 # Editing: hover a block, ✎, say what to change; it goes to Claude as your prompt.
@@ -152,12 +153,15 @@ EDIT_LEFT = [
 EDIT_PANE = [
     [('Rollback', 'fg', 'b')],
     [],
-    [('› ', 'claude'), ('make it a checklist', 'fg'), ('▏', 'fg'), (' ' * 34, 'fg'), ('send ', 'dim'), ('[ ✕ ]', 'fg')],
+    [('╭' + '─' * 74 + '╮', 'claude')],
+    [('│ ', 'claude'), ('> ', 'fg'), ('make it a checklist', 'fg'), ('▏', 'fg'), (' ' * 45, 'fg'), ('send', 'dim'), ('  │', 'claude')],
+    [('╰' + '─' * 74 + '╯', 'claude')],
+    [('  enter to send to Claude · cancel', 'dim')],
+    [],
     [('Turn the flag off, purge the CDN, then post in ', 'fg'), ('#release', 'code'), ('.', 'fg')],
     [],
     [('Owners', 'fg', 'b')],
     [],
     [('Ana for the flag, Raj for the CDN.', 'fg')],
-    [],
 ]
-scene('edit.svg', EDIT_LEFT, EDIT_PANE, 44, 124, 11, [band(45, 124, 2, 4)])
+scene('edit.svg', EDIT_LEFT, EDIT_PANE, 44, 124, 14, [band(45, 124, 2, 8)])

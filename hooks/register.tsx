@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderNode } from 'claude-code'
 
-import type { MdviewDoc, MdviewEdit, MdviewFind } from '../types'
+import type { MdviewDoc, MdviewEdit, MdviewFind, MdviewPending } from '../types'
 import { blocksOf, bmpPixels, clean, fitCells, halfBlocks, hashOf, html, paginate, pngSize, sectionAt, sections, split, tables } from './doc'
 import { basename, dirname, FENCE, hrefOf, linkify, MD, refOf, resolveRef } from './links'
 import type { Ref } from './links'
@@ -12,6 +12,7 @@ const rev = atom({ plugin: 'mdview', key: 'rev' } as const, 0)
 const toc = atom({ plugin: 'mdview', key: 'toc' } as const, false)
 const find = atom({ plugin: 'mdview', key: 'find' } as const, null as MdviewFind | null)
 const edit = atom({ plugin: 'mdview', key: 'edit' } as const, null as MdviewEdit | null, { shape: 'line+hash' })
+const pending = atom({ plugin: 'mdview', key: 'pending' } as const, null as MdviewPending | null)
 const cwdHistory = atom({ plugin: 'mdview', key: 'cwds' } as const, [] as string[])
 
 const TEXT_MAX = 9_000 // a Markdown or Code element takes at most 10,000 characters
@@ -33,7 +34,7 @@ type Part =
 // begins, and what draws it.
 type Block = { line: number; end: number; first: string; hash: string; parts: Part[] }
 type Unit = { level: number; title: string; slug: string; line: number; end: number; plain: string; blocks: Block[] }
-type View = { units: Unit[]; pages: number[] } | { note: string }
+type View = { units: Unit[]; pages: number[]; lines: number; mtime?: number } | { note: string }
 
 // Module state: a reload starts these over, which costs only a few stats.
 let home = ''
@@ -215,7 +216,7 @@ async function build($: EngineInterface, path: string): Promise<View> {
   if (IMAGE.test(path)) {
     const img = await imagePart($, path, basename(path), '/')
     return img
-      ? { units: [{ level: 0, title: '', slug: '', line: 1, end: 1, plain: '', blocks: [{ line: 1, end: 1, first: '', hash: '', parts: [img] }] }], pages: [0] }
+      ? { units: [{ level: 0, title: '', slug: '', line: 1, end: 1, plain: '', blocks: [{ line: 1, end: 1, first: '', hash: '', parts: [img] }] }], pages: [0], lines: 0 }
       : note(`This picture can't be drawn here. Open ${link} instead.`)
   }
   let raw: string
@@ -236,7 +237,7 @@ async function build($: EngineInterface, path: string): Promise<View> {
       units.push({ level: 0, title: '', slug: '', line, end, plain: source.toLowerCase(), blocks: [{ line, end, first: '', hash: hashOf(source), parts }] })
       line = end + 1
     }
-    return { units, pages: paginate(units.map(u => u.plain.length), PAGE_MAX) }
+    return { units, pages: paginate(units.map(u => u.plain.length), PAGE_MAX), lines: line - 1 }
   }
 
   const units: Unit[] = []
@@ -255,7 +256,7 @@ async function build($: EngineInterface, path: string): Promise<View> {
   if (!units.length) units.push({ level: 0, title: '', slug: '', line: 1, end: 1, plain: '', blocks: [{ line: 1, end: 1, first: '', hash: '', parts: [{ kind: 'md', text: '*(empty file)*', hrefs: [] }] }] })
   const size = (u: Unit) =>
     u.blocks.flatMap(b => b.parts).reduce((n, p) => n + (p.kind === 'md' ? p.text.length : p.kind === 'code' ? p.source.length : p.kind === 'raster' ? p.cells.length : 100), 0)
-  return { units, pages: paginate(units.map(size), PAGE_MAX) }
+  return { units, pages: paginate(units.map(size), PAGE_MAX), lines }
 }
 
 // The file as the pane draws it, parsed once per change on disk and width.
@@ -266,7 +267,8 @@ async function load($: EngineInterface, path: string): Promise<View> {
   const key = `${path}|${st.mtimeMs}|${paneColumns}`
   const hit = views.get(key)
   if (hit) return hit
-  const view = await build($, path)
+  const built = await build($, path)
+  const view = 'note' in built ? built : { ...built, mtime: st.mtimeMs }
   views.set(key, view)
   if (views.size > 8) views.delete(views.keys().next().value!)
   return view
@@ -388,8 +390,9 @@ async function sendEdit($: EngineInterface, path: string, u: Unit, b: Block, ins
   if (!what) return
   const where = u.title ? ` in the section "${u.title}"` : ''
   const begins = b.first ? `, which begin "${b.first}"` : ''
+  const mtime = (await $.fs.stat(path).catch(() => null))?.mtimeMs ?? 0
+  await update($, pending, () => ({ path, line: b.line, hash: b.hash, mtime, finished: false }))
   void $.prompt.submit({ text: `Edit lines ${b.line}-${b.end} of \`${tilde(path)}\`${where}${begins}: ${what}`, asUser: true }).catch(() => undefined)
-  $.ui.toast('mdview: sent to Claude')
 }
 
 // Enter in the find bar: the next section holding the text, wrapping around; a new text starts from the first.
@@ -593,6 +596,18 @@ export const register: Register = (on, options) => {
     )
   })
 
+  // Claude's own turn ended: an edit sent from ✎ now reads as done (updated, or no change) and clears a little later.
+  // lazy: any main turn's end counts, so an edit queued behind a running turn can read "no changes" until its own lands
+  on('turn.complete', async ($, e, next) => {
+    const result = await next(e)
+    const p = e.agentId ? null : await read($, pending)
+    if (p && !p.finished) {
+      await update($, pending, x => (x ? { ...x, finished: true } : x))
+      $.clock.after(5_000, () => void update($, pending, x => (x && x.finished && x.hash === p.hash ? null : x)))
+    }
+    return result
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     isOpen = true
     paneColumns = e.props.bodyColumns || paneColumns
@@ -605,7 +620,15 @@ export const register: Register = (on, options) => {
     const isTocOpen = await read($, toc)
     const f = await read($, find)
     const ed = await read($, edit)
-    if (!d) return <Text dimColor>{'Click a .md path in the conversation, or run /md <path>.'}</Text>
+    const sent = await read($, pending)
+    // a ⎿ line, as Claude Code hangs a result under its row
+    const hang = (body: RenderNode, key: string) => (
+      <Box key={key} flexDirection="row">
+        <Text dimColor>{'⎿  '}</Text>
+        {body}
+      </Box>
+    )
+    if (!d) return hang(<Text dimColor>{'Click a .md path in the conversation, or run /md <path>'}</Text>, 'empty')
 
     const v = await load($, d.path)
     const units = 'note' in v ? [] : v.units
@@ -614,28 +637,47 @@ export const register: Register = (on, options) => {
     const page = Math.min(d.page, pageCount - 1)
     const heads = units.flatMap((u, i) => (u.level > 0 ? [{ u, i }] : []))
     const follow = (link: { href: string }) => press($, refOf(link.href))
-    // The block the edit bar is on: the one with the same text, nearest where it was, since the file may have
-    // changed above it; when no block has that text any more the bar closes rather than move onto another.
+    // the section in view: the one last jumped to, else the first on this page
+    const here = Number(/^u(\d+)/.exec(d.target ?? '')?.[1] ?? pages.indexOf(page))
+    // The block the edit bar is on, and the one an edit was sent from: the block with the same text, nearest where it
+    // was, since the file may have changed above it; a block whose text is gone has no bar (it closes rather than move).
     // lazy: two blocks of identical text are told apart by the nearer line only; harmless, as either holds that text
-    let editAt: { i: number; k: number } | null = null
-    if (ed?.path === d.path) {
+    const locate = (where: { path: string; line: number; hash: string } | null, nearest = false) => {
+      let at: { i: number; k: number } | null = null
       let gap = Infinity
+      if (where?.path !== d.path) return at
       for (const [i, u] of units.entries())
         for (const [k, b] of u.blocks.entries()) {
-          if (b.hash !== ed.hash || Math.abs(b.line - ed.line) >= gap) continue
-          gap = Math.abs(b.line - ed.line)
-          editAt = { i, k }
+          if ((!nearest && b.hash !== where.hash) || Math.abs(b.line - where.line) >= gap) continue
+          gap = Math.abs(b.line - where.line)
+          at = { i, k }
         }
+      return at
     }
+    const editAt = locate(ed)
+    // an edit Claude is making: under its block until the file changes, then under the block now at those lines
+    const updated = !!sent && sent.path === d.path && !('note' in v) && (v.mtime ?? 0) > sent.mtime
+    const sentAt = sent ? (updated ? locate(sent, true) : locate(sent) ?? locate(sent, true)) : null
+    const progress = !sent
+      ? null
+      : updated
+        ? hang(<Text color="success">Updated</Text>, 'progress')
+        : sent.finished
+          ? hang(<Text dimColor>No changes made</Text>, 'progress')
+          : hang(<Text color="claude">✶ Claude is editing…</Text>, 'progress')
 
-    const pager = (where: 'top' | 'bottom') =>
-      pageCount > 1 ? (
-        <Box flexDirection="row" gap={1}>
-          {page > 0 && <Button key={`prev-${where}`} label="◂ Prev" {...(where === 'top' ? { hotkey: 'p' } : {})} onPress={() => moveTo($, page - 1, null)} />}
-          <Text dimColor>{`Part ${page + 1} of ${pageCount}`}</Text>
-          {page < pageCount - 1 && <Button key={`next-${where}`} label="Next ▸" {...(where === 'top' ? { hotkey: 'n' } : {})} onPress={() => moveTo($, page + 1, null)} />}
-        </Box>
-      ) : null
+    // The keys, as Claude Code's own panels list theirs: one dim row, each a click away.
+    const keys = [
+      d.back.length > 0 && <Button key="back" plain dimColor hotkey="b" label="back" onPress={() => back($)} />,
+      heads.length > 1 && <Button key="toc" plain dimColor hotkey="t" label="contents" onPress={() => update($, toc, x => !x)} />,
+      Input && units.length > 0 && <Button key="find-toggle" plain dimColor hotkey="f" label="find" onPress={() => update($, find, x => (x ? null : { query: '', at: 0, hits: 0 }))} />,
+      page > 0 && <Button key="prev" plain dimColor hotkey="p" label="previous part" onPress={() => moveTo($, page - 1, null)} />,
+      page < pageCount - 1 && <Button key="next" plain dimColor hotkey="n" label="next part" onPress={() => moveTo($, page + 1, null)} />,
+      isWarp && <Button key="warp" plain dimColor hotkey="w" label="Warp" onPress={() => openWith($, [warpUrl({ abs: d.path, frag: '' })])} />,
+      <Button key="close" plain dimColor hotkey="q" label="close" onPress={() => $.ui.close({ id: PANE })} />,
+    ].filter(Boolean)
+    const dir = dirname(d.path)
+    const meta = 'note' in v ? '' : ` · ${v.lines} line${v.lines === 1 ? '' : 's'}${heads.length ? ` · ${heads.length} section${heads.length === 1 ? '' : 's'}` : ''}`
 
     const draw = (p: Part, key: string) => {
       if (p.kind === 'code') return <Code key={key} source={p.source} path={p.path} startLine={p.startLine} wrap="wrap" />
@@ -643,7 +685,7 @@ export const register: Register = (on, options) => {
         return Raster ? (
           <Box key={`${key}-box`} flexDirection="column" alignItems="flex-start">
             <Raster key={key} cells={p.cells} columns={p.columns} rows={p.rows} />
-            <Button key={`${key}-original`} plain dimColor label="↗ original" onPress={() => openWith($, [p.file])} />
+            <Button key={`${key}-original`} plain dimColor label="⎿  open the original" onPress={() => openWith($, [p.file])} />
           </Box>
         ) : (
           <Text key={key} dimColor>{`[picture: ${p.alt}]`}</Text>
@@ -661,36 +703,52 @@ export const register: Register = (on, options) => {
       )
     }
 
+    // a part boundary, as a dim rule
+    const rule = (text: string, key: string) => (
+      <Text key={key} dimColor wrap="truncate-end">
+        {`── ${text} ${'─'.repeat(Math.max(0, paneColumns - text.length - 4))}`}
+      </Text>
+    )
+
     return (
       <Box flexDirection="column">
-        <Box flexDirection="row" gap={1}>
-          {/* the engine's own close mark sits at the top right, where a terminal may draw over it (Ghostty's 🔒) */}
-          <Button key="close" label="✕" role="dismiss" hotkey="q" onPress={() => $.ui.close({ id: PANE })} />
-          {d.back.length > 0 && <Button key="back" label="← Back" hotkey="b" onPress={() => back($)} />}
-          {heads.length > 1 && <Button key="toc" label={isTocOpen ? 'Contents ▾' : 'Contents'} hotkey="t" onPress={() => update($, toc, x => !x)} />}
-          {isWarp && <Button key="warp" label="Warp ↗" hotkey="w" onPress={() => openWith($, [warpUrl({ abs: d.path, frag: '' })])} />}
-          {Input && units.length > 0 && (
-            <Button key="find-toggle" label="Find" hotkey="f" onPress={() => update($, find, x => (x ? null : { query: '', at: 0, hits: 0 }))} />
-          )}
-          <Text dimColor wrap="truncate-start">
-            {tilde(d.path)}
-          </Text>
+        {/* the file, as Claude Code names one in its rows: ⏺ name, then where and how big, dim */}
+        <Box flexDirection="row">
+          <Text>{'⏺ '}</Text>
+          <Text bold>{basename(d.path)}</Text>
+          <Text dimColor wrap="truncate-start">{`  ${tilde(dir)}${meta}`}</Text>
+        </Box>
+        <Box flexDirection="row" flexWrap="wrap" columnGap={1} marginBottom={1}>
+          {keys.flatMap((k, i) => (i ? [<Text key={`dot${i}`} dimColor>·</Text>, k] : [k]))}
         </Box>
         {f && Input && (
-          <Box flexDirection="column">
-            <Input key="find" placeholder="Find in this file; Enter again for the next" value={f.query} submitLabel="next" autoFocus onSubmit={q => findNext($, q)} />
-            {f.query !== '' && <Text dimColor>{f.hits ? `${f.at + 1} of ${f.hits} sections hold "${f.query}"` : `No "${f.query}" in this file`}</Text>}
+          // the find row, as Claude Code's history search reads: search: <text>  2/5
+          <Box flexDirection="row" gap={1} marginBottom={1}>
+            <Box flexGrow={1}>
+              <Input key="find" label="search:" placeholder="text in this file" value={f.query} submitLabel="next" autoFocus onSubmit={q => findNext($, q)} />
+            </Box>
+            {f.query !== '' && <Text dimColor>{f.hits ? `${f.at + 1}/${f.hits}` : 'no match'}</Text>}
           </Box>
         )}
         {isTocOpen && (
+          // the contents, as Claude Code's own menus list: the section in view marked, a row lights while hovered
           <Box flexDirection="column" marginBottom={1}>
             {heads.slice(0, 200).map(({ u, i }) => (
-              <Button key={`toc-${i}`} plain label={`${'  '.repeat(u.level - 1)}${u.title}`.slice(0, Math.max(10, paneColumns - 2))} onPress={() => goUnit($, i)} />
+              <Box key={`tocrow-${i}`} flexDirection="row">
+                <Text color="suggestion">{i === here ? '› ' : '  '}</Text>
+                <Button
+                  key={`toc-${i}`}
+                  plain
+                  hover={{ color: 'suggestion' }}
+                  label={`${'  '.repeat(u.level - 1)}${u.title}`.slice(0, Math.max(10, paneColumns - 4))}
+                  onPress={() => goUnit($, i)}
+                />
+              </Box>
             ))}
           </Box>
         )}
-        {pager('top')}
-        {'note' in v && <Markdown key="note" text={v.note} />}
+        {pageCount > 1 && page > 0 && rule(`part ${page + 1} of ${pageCount}`, 'rule-top')}
+        {'note' in v && hang(<Markdown key="note" text={v.note} />, 'note')}
         {units.flatMap((u, i) => {
           if (pages[i] !== page) return []
           const firstPart = u.blocks.map((_, k) => u.blocks.slice(0, k).reduce((n, b) => n + b.parts.length, 0))
@@ -698,23 +756,30 @@ export const register: Register = (on, options) => {
             // a blank line between sections and between blocks, as the file itself reads
             <Box key={`sec${i}`} flexDirection="column" marginTop={pages.indexOf(page) === i ? 0 : 1}>
               {u.blocks.map((b, k) => (
-                // each block a hover scope: while the pointer is over it, it lights up (as your own prompts do) and shows its ✎
-                <Box key={`blk${i}-${k}`} flexDirection="column" marginTop={k ? 1 : 0} hover={{ backgroundColor: 'userMessageBackground' }}>
+                // each block a hover scope: while the pointer is over it, it lights as Claude Code lights a hovered
+                // prompt, and shows its ✎
+                <Box key={`blk${i}-${k}`} flexDirection="column" marginTop={k ? 1 : 0} hover={{ backgroundColor: 'userMessageBackgroundHover' }}>
                   {editAt?.i === i && editAt.k === k && Input && (
-                    <Box flexDirection="row" gap={1}>
-                      <Box flexGrow={1}>
+                    // a small prompt to Claude: its border, its ">", and the keys under it
+                    <Box flexDirection="column" marginBottom={1}>
+                      <Box borderStyle="round" borderColor="promptBorder" paddingX={1}>
                         <Input
                           key="edit-input"
-                          placeholder={`Tell Claude how to change lines ${b.line}-${b.end}; Enter sends`}
+                          label=">"
+                          placeholder={`what to change in lines ${b.line}-${b.end}`}
                           submitLabel="send"
                           autoFocus
                           onSubmit={text => sendEdit($, d.path, u, b, text)}
                         />
                       </Box>
-                      <Button key="edit-cancel" label="✕" onPress={() => update($, edit, () => null)} />
+                      <Box flexDirection="row" columnGap={1} paddingLeft={2}>
+                        <Text dimColor>enter to send to Claude ·</Text>
+                        <Button key="edit-cancel" plain dimColor label="cancel" onPress={() => update($, edit, () => null)} />
+                      </Box>
                     </Box>
                   )}
                   {b.parts.map((p, m) => draw(p, keyOf(i, firstPart[k]! + m)))}
+                  {sentAt?.i === i && sentAt.k === k && progress}
                   {Input && (
                     <Box position="absolute" top={0} right={0} display="none" hover={{ display: 'flex' }}>
                       <Button key={`edit-${i}-${k}`} plain dimColor label="✎" onPress={() => update($, edit, () => ({ path: d.path, line: b.line, hash: b.hash }))} />
@@ -725,7 +790,15 @@ export const register: Register = (on, options) => {
             </Box>,
           ]
         })}
-        {pager('bottom')}
+        {pageCount > 1 && (
+          <Box flexDirection="row" marginTop={1}>
+            {page < pageCount - 1 ? (
+              <Button key="next-end" plain dimColor label={`── part ${page + 1} of ${pageCount} · next part ↓ ──`} onPress={() => moveTo($, page + 1, null)} />
+            ) : (
+              rule(`part ${page + 1} of ${pageCount} · end`, 'rule-end')
+            )}
+          </Box>
+        )}
       </Box>
     )
   })
