@@ -34,7 +34,7 @@ makes the edit, and the pane redraws as it lands.
 | **One click to read** | A `.md` path that names a real file gets a `↗`, whether it is in backticks, bare, a markdown link or run into Chinese text. Links appear in replies, under `Read` / `Write` / `Edit` rows and under your own prompts. `path:42` and `path#heading` land on the spot |
 | **A reader, not a dump** | Sections with a Contents list (`t`), Find (`f`), long files in parts (`p` `n`), links between files followed in place, and Back (`b`) |
 | **Pictures in the terminal** | The terminal's own sharp picture in Ghostty, kitty and iTerm2 3.7+, and colored half blocks anywhere else. PNG, JPEG, GIF and HEIC all work |
-| **Point, then edit** | Hover a block and it lights up with a `✎`. Say what to change and press Enter; Claude gets the file, the lines and how they begin |
+| **Point, then edit** | Hover a block and it lights up with a `✎`. Say what to change and press Enter; Claude gets the file, the lines and how they begin, and the block shows how the edit is going |
 | **Live** | A file Claude writes redraws at once; one changed elsewhere within 1.5 s |
 | **Your viewer, per terminal** | A click opens mdview's pane, Warp's own Markdown viewer split beside the session, or the app macOS opens `.md` with. `/md mode` switches |
 | **More than markdown** | Any text file opens as highlighted code with line numbers. Common HTML and too-wide tables are turned into something a terminal can show |
@@ -58,9 +58,12 @@ makes the edit, and the pane redraws as it lands.
 **Click `✎`** and type the change, such as *make it a checklist*. **Enter** sends it as your prompt, naming the file,
 the lines and how they begin.
 
-**Claude edits.** A line under the block follows it, as Claude Code hangs a result under its row: `⎿ ✶ Claude is
-editing…`, then `⎿ Updated`, and the pane redraws in place. If the file shifts under an open bar, the bar follows its
-block; if the block is gone, the bar closes.
+**Claude edits.** A line under the block follows the edit, as Claude Code hangs a result under its row:
+`✶ Waiting for Claude…` while another turn runs, `✶ Claude is editing…` once its own starts, then `Updated` when Claude
+wrote the file, or `No changes made`. The pane redraws in place, and the line goes a few seconds later. Send several and
+each keeps its own line; a prompt that cannot be sent says why.
+
+If the file shifts under an open bar, the bar follows its block; if the block is gone, the bar closes.
 
 </td>
 </tr>
@@ -104,7 +107,7 @@ Or load it for one session only: `claude --plugin-dir ~/Desktop/claude-mdview`.
 | **Esc** · `q` | Closes the pane |
 | `b` | Back to the file you came from |
 | `t` · `f` | Contents · Find (Enter again for the next match) |
-| `p` · `n` | Previous · next part of a long file |
+| `p` · `n` | Previous · next part of a long file, also at the foot of each part |
 | `w` | In Warp: this file in Warp's own viewer |
 | **Hover** → `✎` | Edit that block with Claude |
 
@@ -172,7 +175,7 @@ It makes no network requests, stores nothing across sessions, and calls no model
 
 ```sh
 claude plugin validate .
-claude plugin test .            # 36 tests
+claude plugin test .            # 38 tests
 python3 assets/make_previews.py # the README pictures
 ```
 

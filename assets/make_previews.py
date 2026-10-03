@@ -153,9 +153,9 @@ EDIT_LEFT = [
 EDIT_PANE = [
     [('Rollback', 'fg', 'b')],
     [],
-    [('╭' + '─' * 74 + '╮', 'claude')],
-    [('│ ', 'claude'), ('> ', 'fg'), ('make it a checklist', 'fg'), ('▏', 'fg'), (' ' * 45, 'fg'), ('send', 'dim'), ('  │', 'claude')],
-    [('╰' + '─' * 74 + '╯', 'claude')],
+    [('╭' + '─' * 74 + '╮', 'dim')],
+    [('│ ', 'dim'), ('> ', 'fg'), ('make it a checklist', 'fg'), ('▏', 'fg'), (' ' * 45, 'fg'), ('send', 'dim'), ('  │', 'dim')],
+    [('╰' + '─' * 74 + '╯', 'dim')],
     [('  enter to send to Claude · cancel', 'dim')],
     [],
     [('Turn the flag off, purge the CDN, then post in ', 'fg'), ('#release', 'code'), ('.', 'fg')],

@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
+import type { MockClock } from 'claude-code/testing'
 
 import { blocksOf, bmpPixels, fitCells, halfBlocks, html, paginate, pngSize, sectionAt, sections, split, tables } from './doc'
 import { hrefOf, linkify, refOf, resolveRef } from './links'
@@ -32,12 +33,14 @@ type World = {
   invalidated: number
   closed: number
   doc?: { page: number; target: string | null }
+  clock?: MockClock
+  dropPrompt?: string
 }
 const world = (files: World['files'], env: Record<string, string> = {}): World => ({ files, env, cwd: '/w', runs: [], prompts: [], configs: [], mtimes: {}, opened: [], invalidated: 0, closed: 0 })
 
 // The engine beneath a started session: a tiny file system, the working directory, and the pane calls.
 const start = async ($: { session: { start: (e: never) => Promise<unknown> } }, on: On, w: World) => {
-  mock.clock(on)
+  w.clock = mock.clock(on)
   on('env.get', ($, e) => ({ value: e.name === 'HOME' ? '/home/u' : w.env[e.name] }) as never)
   // sips: a picture's size, or a conversion written where --out says (a 2×2 BMP stands for every picture)
   on('process.run', ($, e) => {
@@ -59,9 +62,10 @@ const start = async ($: { session: { start: (e: never) => Promise<unknown> } }, 
     if (f === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: typeof f === 'string' ? f : { base64: f.bytes } } as never
   })
-  on('prompt.submit', ($, e) => (w.prompts.push(e.text), { text: e.text }) as never)
+  on('prompt.submit', ($, e) => (w.prompts.push(e.text), w.dropPrompt ? { drop: w.dropPrompt } : { text: e.text }) as never)
   on('config.set', ($, e) => (w.configs.push([e.key, e.value]), w.configAnswer ?? { value: e.value }) as never)
   on('command.register', () => ({ value: { command: 'md' } }) as never)
+  on('tool.register', () => ({ value: { tool: 'mcp__mdview__show' } }) as never)
   on('ui.open', ($, e) => (w.opened.push(e.title ?? e.id), { value: { isPlaced: true } }) as never)
     on('ui.close', () => (w.closed++, { value: undefined }))
   on('state.set', ($, e, next) => {
@@ -71,6 +75,7 @@ const start = async ($: { session: { start: (e: never) => Promise<unknown> } }, 
   on('ui.invalidate', () => (w.invalidated++, { value: undefined }) as never)
   on('tool.call', () => ({ result: { type: 'create', filePath: '/w/new.md', content: '' } }) as never)
   on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }) as never)
   // the engine's own drawings
   on('ui.render', { component: 'AssistantMessage' }, () => ({ type: 'engine', ref: 0 }) as never)
@@ -265,7 +270,8 @@ test('contents and find jump to sections; in Ghostty a PNG on its own line is th
 
   await pane.press({ key: 'toc' })
   expect(await pane.find({ key: 'toc-2', type: 'Button' })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: '› ' })).toBeDefined() // the section in view is marked
+  const row = async (i: number) => JSON.stringify((await pane.find({ key: `tocrow-${i}` }))?.children)
+  expect([await row(0), await row(2)].map(r => r.includes('› '))).toEqual([true, false]) // the section in view is marked
   await pane.press({ key: 'toc-2' })
   expect(w.doc?.target).toBe('u2')
   expect(await pane.find({ key: 'toc-2' })).toBeUndefined() // contents fold after a jump
@@ -286,11 +292,15 @@ test('a long file is paged; another file is shown as highlighted code from its l
   await start($, on, w)
   await $.command.run({ command: 'md', args: 'big.md' } as never)
   const pane = await $.ui.mount(PANE)
-  expect((await pane.find({ key: 'next-end' }))?.props.label).toBe('── part 1 of 2 · next part ↓ ──')
+  expect((await pane.find({ key: 'next-end' }))?.props.label).toBe('next part ↓')
+  expect(await pane.find({ key: 'prev-end' })).toBeUndefined()
   expect(await pane.find({ key: 'u11' })).toBeUndefined()
   await pane.press({ key: 'next' })
   expect(await pane.find({ key: 'u11' })).toBeDefined()
   expect(await pane.find({ key: 'u0' })).toBeUndefined()
+  expect(await pane.find({ key: 'next-end' })).toBeUndefined() // the last part ends; the one before is a click away
+  await pane.press({ key: 'prev-end' })
+  expect(await pane.find({ key: 'u0' })).toBeDefined()
 
   expect(await $.command.run({ command: 'md', args: '"src/a.ts:1"' } as never)).toMatchObject({ text: 'Showing /w/src/a.ts' })
   const code = await pane.find({ type: 'Code' })
@@ -425,23 +435,64 @@ describe('editing', () => {
     await pane.unmount()
   })
 
-  test('an edit sent from ✎ shows under its block: Claude is editing, then Updated, or No changes made', async ($, on) => {
+  test('an edit from ✎ shows under its block and follows its own turn: waiting, editing, then Updated, gone 5 s later', async ($, on) => {
     const w = world({ '/w/a.md': '# One\n\nalpha\n\nbeta' }, {})
     await start($, on, w)
     await $.command.run({ command: 'md', args: 'a.md' } as never)
-    let pane = await $.ui.mount(PANE)
-    await pane.press({ key: 'edit-0-1' })
+    const pane = await $.ui.mount(PANE)
+    const under = async (key: string) => JSON.stringify((await pane.find({ key }))?.children ?? null)
+    const turn = (turnId: string) => ({ turnId, reason: 'answer', answer: '', durationMs: 1, isAborted: false }) as never
+    await pane.press({ key: 'edit-0-1' }) // "alpha"
     await field(pane).input({ key: 'edit-input', text: 'shorter' })
-    expect(await pane.find({ type: 'Text', text: '✶ Claude is editing…' })).toBeDefined()
-    await pane.unmount()
+    expect(await under('blk0-1')).toContain('✶ Waiting for Claude…')
+    expect(await under('blk0-2')).not.toContain('Claude')
+    await $.turn.complete(turn('earlier')) // a turn already running ends first: not this edit's
+    expect(await under('blk0-1')).toContain('✶ Waiting for Claude…')
+    await $.turn.start({ text: w.prompts[0]!, turnId: 't1' })
+    expect(await under('blk0-1')).toContain('✶ Claude is editing…')
+
+    // a save from elsewhere is not Claude's change
     w.files['/w/a.md'] = '# One\n\nalph\n\nbeta'
     w.mtimes['/w/a.md'] = 2
-    pane = await $.ui.mount(PANE)
-    expect(await pane.find({ type: 'Text', text: 'Updated' })).toBeDefined()
-    await pane.press({ key: 'edit-0-2' })
+    await w.clock!.advance(1_500)
+    expect(await under('blk0-1')).toContain('✶ Claude is editing…')
+    // a second edit sent meanwhile waits for its own turn
+    await pane.press({ key: 'edit-0-2' }) // "beta"
     await field(pane).input({ key: 'edit-input', text: 'longer' })
-    await $.turn.complete({ turnId: 't', reason: 'answer', answer: '', durationMs: 1, isAborted: false } as never)
-    expect(await pane.find({ type: 'Text', text: 'No changes made' })).toBeDefined()
+    expect(await under('blk0-2')).toContain('✶ Waiting for Claude…')
+
+    await $.tool.call({ tool: 'Edit', file_path: '/w/a.md', old_string: 'alpha', new_string: 'alph' } as never)
+    await $.turn.complete(turn('t1'))
+    expect(await under('blk0-1')).toContain('Updated')
+    expect(await under('blk0-2')).toContain('✶ Waiting for Claude…')
+    await $.turn.start({ text: w.prompts[1]!, turnId: 't2' })
+    await $.turn.complete(turn('t2'))
+    expect(await under('blk0-2')).toContain('No changes made')
+    await w.clock!.advance(6_000)
+    expect(await under('blk0-1')).not.toContain('Updated')
+    expect(await under('blk0-2')).not.toContain('No changes made')
+    await pane.unmount()
+  })
+
+  test('an edit whose prompt does not enter leaves no line under its block', async ($, on) => {
+    const w = world({ '/w/a.md': '# One\n\nalpha' }, {})
+    w.dropPrompt = 'blocked by a hook'
+    await start($, on, w)
+    await $.command.run({ command: 'md', args: 'a.md' } as never)
+    const pane = await $.ui.mount(PANE)
+    await pane.press({ key: 'edit-0-1' })
+    await field(pane).input({ key: 'edit-input', text: 'shorter' })
+    expect(w.prompts.length).toBe(1)
+    expect(JSON.stringify((await pane.find({ key: 'blk0-1' }))?.children)).not.toContain('Claude')
+    await pane.unmount()
+  })
+
+  test('a file in the home folder is under ~; lines are counted as an editor counts them', async ($, on) => {
+    const w = world({ '/home/u/notes.md': '# N\n\none\n' }, {})
+    await start($, on, w)
+    await $.command.run({ command: 'md', args: '/home/u/notes.md' } as never)
+    const pane = await $.ui.mount(PANE)
+    expect(await pane.find({ type: 'Text', text: '  ~ · 3 lines · 1 section' })).toBeDefined()
     await pane.unmount()
   })
 

@@ -29,7 +29,7 @@ Claude 常把计划、报告、笔记写成 markdown 文件，再把路径告诉
 | **一键就读** | 指向真实文件的 `.md` 路径后面会带上 `↗`,反引号里的、裸写的、markdown 链接、和中文紧贴的都认得。回复里有，`Read` / `Write` / `Edit` 工具行下面和你自己的消息下面也有。`路径:42` 和 `路径#标题` 直接跳到那里 |
 | **是阅读器，不是一堆字** | 按标题分节，有目录(`t`)、查找(`f`),长文件分成几部分(`p` `n`),文档之间的链接在 pane 里接着打开，还能返回(`b`) |
 | **终端里看图** | 在 Ghostty、kitty、iTerm2 3.7+ 里是终端自己画的清晰原图，其他终端是彩色半格色块。PNG、JPEG、GIF、HEIC 都行 |
-| **指哪改哪** | 鼠标停在某一块上，它会高亮，并出现 `✎`。写下要怎么改，回车;Claude 会收到文件、行号和这一块的开头 |
+| **指哪改哪** | 鼠标停在某一块上，它会高亮，并出现 `✎`。写下要怎么改，回车;Claude 会收到文件、行号和这一块的开头，这一块下面实时显示改到哪了 |
 | **实时刷新** | Claude 写的文件立即刷新;外部修改最多 1.5 秒 |
 | **每个终端用顺手的查看器** | 单击可以开 mdview 的 pane、Warp 自带的 Markdown 查看器(在会话旁边分栏),或者 macOS 给 `.md` 设定的默认程序。用 `/md mode` 切换 |
 | **不止 markdown** | 任何文本文件都按代码高亮显示，带行号。常见 HTML 和放不下的宽表格会转成终端能显示的样子 |
@@ -52,7 +52,9 @@ Claude 常把计划、报告、笔记写成 markdown 文件，再把路径告诉
 
 **点 `✎`** 写下修改，比如"改成清单"。**回车**后它作为你的消息发出，带上文件、行号和这一块的开头。
 
-**Claude 动手改。** 这一块下面会挂一行进度，就像 Claude Code 在自己的条目下挂结果那样：先是 `⎿ ✶ Claude is editing…`,改完变成 `⎿ Updated`,pane 原地刷新。输入条开着时文件变了，它会跟着那一块走;那一块被删了，输入条就关掉。
+**Claude 动手改。** 这一块下面会挂一行进度，就像 Claude Code 在自己的条目下挂结果那样：前面还有别的回合在跑时是 `✶ Waiting for Claude…`,轮到它时变成 `✶ Claude is editing…`,结束后 Claude 写了这个文件就显示 `Updated`,没写就是 `No changes made`。pane 原地刷新，这行几秒后消失。连发几处，各自挂各自的进度;消息发不出去会提示原因。
+
+输入条开着时文件变了，它会跟着那一块走;那一块被删了，输入条就关掉。
 
 </td>
 </tr>
@@ -94,7 +96,7 @@ git clone https://github.com/xuanji86/claude-mdview ~/Desktop/claude-mdview
 | **Esc** · `q` | 关闭 pane |
 | `b` | 回到上一个文档 |
 | `t` · `f` | 目录 · 查找(再按回车跳到下一个) |
-| `p` · `n` | 长文件的上一部分 · 下一部分 |
+| `p` · `n` | 长文件的上一部分 · 下一部分(每部分末尾也有) |
 | `w` | 在 Warp 里：用 Warp 自带的查看器打开这个文件 |
 | **悬停** → `✎` | 让 Claude 改这一块 |
 
@@ -155,7 +157,7 @@ mdview 只读、只画，只在你要求时动手。`claude plugin validate .` �
 
 ```sh
 claude plugin validate .
-claude plugin test .            # 36 个测试
+claude plugin test .            # 38 个测试
 python3 assets/make_previews.py # 生成 README 里的图
 ```
 
